@@ -60,6 +60,17 @@ fn entry() -> Result<()> {
         }
         let mut terminal = ratatui::init();
         let _restore = Restore;
+        // Report presses, releases and the wheel only. Crossterm's
+        // EnableMouseCapture also turns on any-motion tracking (1003), which
+        // floods the loop with events while the pointer moves.
+        #[cfg(unix)]
+        {
+            use std::io::Write;
+            let mut out = io::stdout();
+            out.write_all(b"\x1b[?1000h\x1b[?1015h\x1b[?1006h")?;
+            out.flush()?;
+        }
+        #[cfg(not(unix))]
         crossterm::execute!(io::stdout(), crossterm::event::EnableMouseCapture)?;
         return app::run(args, clock, &mut terminal, &shutdown);
     }

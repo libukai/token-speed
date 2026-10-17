@@ -148,9 +148,11 @@ token-speed --provider claude --model opus --view requests
 
 | Key | Action |
 | --- | --- |
-| `Tab` / `Shift-Tab`, `F1`–`F4` | Switch views; navigation labels are clickable |
+| `Tab` / `Shift-Tab`, `F1`–`F4` | Switch views |
+| Mouse | Click tabs, sources, time windows, table rows (again for details), chart buckets and `◐` theme; wheel scrolls |
 | `1` / `2` / `3` / `4` | All / Codex / Claude / DSH (shown once DSH logs exist) |
 | `t` / `w` / `m` / `a`, `d` | Today / 7 days / 30 days / all; cycle range |
+| `T` | Toggle dark / light theme |
 | `/`, `Esc` | Filter by model or session; close / clear |
 | `↑` / `↓`, `j` / `k`, mouse wheel | Select rows; `Home` / `End` jump to ends |
 | `←` / `→`, `g` | Timeline bucket / split or overlay |
@@ -196,6 +198,7 @@ Text tables have borders, right-aligned numeric columns and, for summaries, a to
 | `--today`, `--days N`, `--all-time`, `--since`, `--until` | Time range |
 | `--timezone` | IANA timezone; defaults to `TZ` or local timezone |
 | `--view` | Initial dashboard view |
+| `--theme dark\|light` | Dashboard colors (`TOKEN_SPEED_THEME`); `T` toggles while running |
 | `--table`, `--json` | One-shot text table or JSON report; bypass the TUI |
 | `--group hour\|day\|model`, `--format table\|json\|csv` | Report grouping and format |
 | `--max-gap SECONDS` | Maximum usable timing interval; default 300 |

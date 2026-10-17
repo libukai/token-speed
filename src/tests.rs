@@ -574,14 +574,20 @@ fn export_visual_preview() {
         }
         let mut term = Terminal::new(TestBackend::new(140, 46)).unwrap();
         term.draw(|f| ui::draw(f, &mut app)).unwrap();
-        let mut svg = String::from(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1540\" height=\"966\" viewBox=\"0 0 1540 966\"><rect width=\"100%\" height=\"100%\" fill=\"#0b101a\"/><g font-family=\"Menlo,monospace\" font-size=\"16\">",
+        let hex = |c: Color| match c {
+            Color::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
+            _ => unreachable!("palette colors are RGB"),
+        };
+        let (bg, ink) = ui::base_colors(app.args.theme);
+        let (bg, ink) = (hex(bg), hex(ink));
+        let mut svg = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1540\" height=\"966\" viewBox=\"0 0 1540 966\"><rect width=\"100%\" height=\"100%\" fill=\"{bg}\"/><g font-family=\"Menlo,monospace\" font-size=\"16\">",
         );
         let color = |c: Color| -> String {
             match c {
-                Color::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
-                Color::Reset => "#0b101a".into(),
-                _ => "#dce6f4".into(),
+                Color::Rgb(..) => hex(c),
+                Color::Reset => bg.clone(),
+                _ => ink.clone(),
             }
         };
         for y in 0..46 {
@@ -814,4 +820,189 @@ fn dsh_source_appears_once_indexed() {
         .collect::<String>();
     assert!(text.contains("4 DSH"));
     assert!(text.contains("DSH"));
+}
+
+fn draw_at(app: &mut app::App, width: u16, height: u16) -> Vec<String> {
+    let mut term = Terminal::new(TestBackend::new(width, height)).unwrap();
+    term.draw(|f| ui::draw(f, app)).unwrap();
+    let buffer = term.backend().buffer();
+    (0..height)
+        .map(|y| (0..width).map(|x| buffer[(x, y)].symbol()).collect())
+        .collect()
+}
+/// Click the first cell of `label` as rendered, the way a user would.
+fn click_label(app: &mut app::App, width: u16, height: u16, label: &str) {
+    let lines = draw_at(app, width, height);
+    let (y, x) = lines
+        .iter()
+        .enumerate()
+        .find_map(|(y, line)| {
+            line.find(label)
+                .map(|byte| (y, line[..byte].chars().count()))
+        })
+        .unwrap_or_else(|| panic!("{label:?} not rendered at {width}x{height}"));
+    app.click(x as u16, y as u16).unwrap();
+}
+
+#[test]
+fn theme_toggles_by_key_flag_and_click() {
+    let mut app = demo_app();
+    assert_eq!(app.args.theme, args::Theme::Dark);
+    let background = |app: &mut app::App| {
+        let mut term = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        term.draw(|f| ui::draw(f, app)).unwrap();
+        term.backend().buffer()[(0, 0)].bg
+    };
+    let dark = background(&mut app);
+    press(&mut app, KeyCode::Char('T'));
+    assert_eq!(app.args.theme, args::Theme::Light);
+    let light = background(&mut app);
+    assert_ne!(dark, light);
+    assert_eq!(
+        (dark, light),
+        (
+            ui::base_colors(args::Theme::Dark).0,
+            ui::base_colors(args::Theme::Light).0
+        )
+    );
+    click_label(&mut app, 120, 40, "◐ Light");
+    assert_eq!(app.args.theme, args::Theme::Dark);
+    let args = Args::parse_from(["token-speed", "--theme", "light"]);
+    assert_eq!(args.theme, args::Theme::Light);
+}
+
+#[test]
+fn clicks_hit_rendered_controls_at_every_width() {
+    // Chips sit on top of right-aligned and narrow layouts; each click must
+    // land on the control actually drawn under the pointer.
+    for (width, height) in [(140, 46), (120, 40), (100, 30), (80, 24), (60, 20)] {
+        let mut app = demo_app();
+        click_label(&mut app, width, height, "3 Claude");
+        assert_eq!(app.args.provider, args::Provider::Claude, "{width}");
+        assert!(app.view.rows.iter().all(|r| r.provider == "claude"));
+        click_label(&mut app, width, height, "1 All");
+        assert_eq!(app.args.provider, args::Provider::All, "{width}");
+        click_label(&mut app, width, height, "F3 Models");
+        assert_eq!(app.screen, args::Screen::Models, "{width}");
+        // Short tab labels below 80 columns inside the margin.
+        click_label(&mut app, width, height, "F2 Time");
+        assert_eq!(app.screen, args::Screen::Timeline, "{width}");
+        // Below 102 columns (100 inside the margin) the toolbar is compact.
+        if width >= 102 {
+            click_label(&mut app, width, height, "30 days");
+            assert_eq!(app.range, app::Range::Month, "{width}");
+            click_label(&mut app, width, height, "Today");
+            assert_eq!(app.range, app::Range::Today, "{width}");
+        } else {
+            let range = app.range;
+            click_label(&mut app, width, height, range.label());
+            assert_ne!(app.range, range, "{width}");
+        }
+        // Gaps between chips do nothing.
+        let before = (app.args.provider, app.screen, app.range);
+        let lines = draw_at(&mut app, width, height);
+        let y = lines.iter().position(|l| l.contains("1 All")).unwrap();
+        // The chip " 1 All " starts one cell before the label; the next cell
+        // after it is the single-space gap.
+        let label = lines[y].find("1 All").unwrap();
+        let x = lines[y][..label].chars().count() - 1 + " 1 All ".len();
+        app.click(x as u16, y as u16).unwrap();
+        assert_eq!(before, (app.args.provider, app.screen, app.range));
+    }
+}
+
+#[test]
+fn clicks_select_rows_buckets_and_close_dialogs() {
+    let mut app = demo_app();
+    app.set_screen(args::Screen::Requests);
+    let lines = draw_at(&mut app, 140, 46);
+    let header = lines.iter().position(|l| l.contains("Completed")).unwrap();
+    // The first body row is two lines under the header (header margin).
+    app.click(20, header as u16 + 4).unwrap();
+    assert_eq!(app.table.selected(), Some(2));
+    assert!(!app.detail);
+    app.click(20, header as u16 + 4).unwrap();
+    assert!(app.detail, "second click on the selected row opens details");
+    app.click(0, 0).unwrap();
+    assert!(!app.detail, "a click dismisses the dialog");
+    // Rows below the end of the table select nothing.
+    app.records.truncate(2);
+    app.rebuild().unwrap();
+    draw_at(&mut app, 140, 46);
+    let selected = app.table.selected();
+    app.click(20, header as u16 + 10).unwrap();
+    assert_eq!(app.table.selected(), selected);
+    assert!(!app.detail);
+
+    // Scrolled tables map clicks through the scroll offset.
+    let mut app = demo_app();
+    app.set_screen(args::Screen::Requests);
+    for _ in 0..120 {
+        press(&mut app, KeyCode::Down);
+    }
+    draw_at(&mut app, 140, 46);
+    let offset = app.table.offset();
+    assert!(offset > 0);
+    app.click(20, header as u16 + 2).unwrap();
+    assert_eq!(app.table.selected(), Some(offset));
+
+    // The coverage strip and the plot move the bucket cursor.
+    let mut app = demo_app();
+    app.set_screen(args::Screen::Timeline);
+    let lines = draw_at(&mut app, 140, 46);
+    let y = lines
+        .iter()
+        .position(|l| l.contains("Codex  ") && l.contains('█'))
+        .unwrap();
+    let start = lines[y].find("Codex  ").unwrap();
+    let start = lines[y][..start].chars().count() + 7;
+    app.click(start as u16, y as u16).unwrap();
+    assert_eq!(app.cursor, 0);
+    let last = lines[y]
+        .chars()
+        .enumerate()
+        .filter(|(_, c)| "░!▁▂▃▄▅▆▇█".contains(*c))
+        .map(|(x, _)| x)
+        .max()
+        .unwrap();
+    app.click(last as u16, y as u16).unwrap();
+    assert_eq!(app.cursor, app.view.bins.len() - 1);
+
+    // A click while typing a filter keeps it and still acts.
+    press(&mut app, KeyCode::Char('/'));
+    press(&mut app, KeyCode::Char('g'));
+    click_label(&mut app, 140, 46, "F4 Requests");
+    assert!(!app.editing);
+    assert_eq!(app.search, "g");
+    assert_eq!(app.screen, args::Screen::Requests);
+}
+
+#[test]
+fn idle_mouse_events_are_ignored_but_clicks_redraw() {
+    use crossterm::event::{Event, MouseButton, MouseEvent, MouseEventKind};
+    let mut app = demo_app();
+    let mouse = |kind| {
+        Event::Mouse(MouseEvent {
+            kind,
+            column: 1,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        })
+    };
+    for kind in [
+        MouseEventKind::Moved,
+        MouseEventKind::Up(MouseButton::Left),
+        MouseEventKind::Drag(MouseButton::Left),
+        MouseEventKind::Down(MouseButton::Right),
+    ] {
+        assert!(matches!(
+            app.event(mouse(kind)).unwrap(),
+            app::Handled::Ignored
+        ));
+    }
+    assert!(matches!(
+        app.event(mouse(MouseEventKind::Down(MouseButton::Left)))
+            .unwrap(),
+        app::Handled::Changed
+    ));
 }

@@ -17,6 +17,18 @@ use std::{
 
 pub const SOURCES: usize = Provider::SOURCES.len();
 
+/// Something on screen that reacts to a left click.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Click {
+    Screen(Screen),
+    Source(Provider),
+    Range(Range),
+    CycleRange,
+    Theme,
+    Row(usize),
+    Bucket(usize),
+}
+
 pub enum Load {
     Progress(usize, usize),
     Done(Result<(Vec<Record>, Metadata)>),
@@ -90,7 +102,8 @@ pub struct App {
     pub screen: Screen,
     pub cursor: usize,
     pub overlay: bool,
-    pub view_tabs: Vec<(Rect, Screen)>,
+    /// Click targets recorded by the most recent draw.
+    pub hits: Vec<(Rect, Click)>,
     pub table: TableState,
     pub search: String,
     pub editing: bool,
@@ -132,7 +145,7 @@ impl App {
             screen,
             cursor: usize::MAX,
             overlay: false,
-            view_tabs: Vec::new(),
+            hits: Vec::new(),
             table: TableState::default().with_selected(Some(0)),
             search: String::new(),
             editing: false,
@@ -299,18 +312,53 @@ impl App {
         self.screen = screen;
         self.table = TableState::default().with_selected((self.row_count() > 0).then_some(0));
     }
-    pub fn click_view(&mut self, column: u16, row: u16) {
-        if self.help || self.detail || self.editing {
-            return;
+    /// Handle a left click against the targets of the last frame.
+    pub fn click(&mut self, column: u16, row: u16) -> Result<()> {
+        // A click outside a dialog dismisses it rather than being lost.
+        if self.help || self.detail {
+            self.help = false;
+            self.detail = false;
+            return Ok(());
         }
-        let screen = self
-            .view_tabs
+        // Keep the typed filter, as Enter would, then act on the click.
+        self.editing = false;
+        let Some(target) = self
+            .hits
             .iter()
+            .rev()
             .find(|(r, _)| column >= r.x && column < r.right() && row >= r.y && row < r.bottom())
-            .map(|(_, s)| *s);
-        if let Some(screen) = screen {
-            self.set_screen(screen);
+            .map(|(_, c)| *c)
+        else {
+            return Ok(());
+        };
+        match target {
+            Click::Screen(screen) => self.set_screen(screen),
+            Click::Source(provider) => {
+                self.args.provider = provider;
+                self.table.select(Some(0));
+                self.rebuild()?;
+            }
+            Click::Range(range) => self.set_range(range)?,
+            Click::CycleRange => self.cycle_range()?,
+            Click::Theme => self.args.theme = self.args.theme.toggled(),
+            Click::Row(i) => {
+                if self.table.selected() == Some(i) {
+                    self.detail = true;
+                } else {
+                    self.table.select(Some(i));
+                }
+            }
+            Click::Bucket(i) => self.cursor = i,
         }
+        Ok(())
+    }
+    fn cycle_range(&mut self) -> Result<()> {
+        self.set_range(match self.range {
+            Range::Today => Range::Week,
+            Range::Week => Range::Month,
+            Range::Month => Range::All,
+            _ => Range::Today,
+        })
     }
     pub fn key(&mut self, key: KeyEvent) -> Result<bool> {
         if key.kind == KeyEventKind::Release {
@@ -353,14 +401,8 @@ impl App {
             KeyCode::Char('2') => self.args.provider = Provider::Codex,
             KeyCode::Char('3') => self.args.provider = Provider::Claude,
             KeyCode::Char('4') => self.args.provider = Provider::Dsh,
-            KeyCode::Char('d') => {
-                self.set_range(match self.range {
-                    Range::Today => Range::Week,
-                    Range::Week => Range::Month,
-                    Range::Month => Range::All,
-                    _ => Range::Today,
-                })?;
-            }
+            KeyCode::Char('d') => self.cycle_range()?,
+            KeyCode::Char('T') => self.args.theme = self.args.theme.toggled(),
             KeyCode::Char('t') => {
                 self.set_range(Range::Today)?;
             }
@@ -437,38 +479,56 @@ pub fn run(
     while !shutdown.load(Ordering::Relaxed) {
         app.poll();
         terminal.draw(|f| crate::ui::draw(f, &mut app))?;
-        if event::poll(Duration::from_millis(150))? {
-            match event::read()? {
-                Event::Key(key) => {
-                    if app.key(key)? {
-                        break;
-                    }
-                }
-                Event::Mouse(event) => {
-                    use crossterm::event::{MouseButton, MouseEventKind};
-                    if event.kind == MouseEventKind::Down(MouseButton::Left) {
-                        app.click_view(event.column, event.row);
-                    }
-                    let code = match event.kind {
-                        MouseEventKind::ScrollDown => Some(if app.screen == Screen::Timeline {
-                            KeyCode::Right
-                        } else {
-                            KeyCode::Down
-                        }),
-                        MouseEventKind::ScrollUp => Some(if app.screen == Screen::Timeline {
-                            KeyCode::Left
-                        } else {
-                            KeyCode::Up
-                        }),
-                        _ => None,
-                    };
-                    if let Some(code) = code {
-                        app.key(KeyEvent::new(code, KeyModifiers::NONE))?;
-                    }
-                }
-                _ => {}
+        if !event::poll(Duration::from_millis(150))? {
+            continue;
+        }
+        // Skip events that change nothing without redrawing, so a burst of
+        // motion or release reports cannot delay the next click. Stop at the
+        // first event that does change state: the next click must be tested
+        // against a freshly drawn frame.
+        loop {
+            match app.event(event::read()?)? {
+                Handled::Quit => return Ok(()),
+                Handled::Changed => break,
+                Handled::Ignored if event::poll(Duration::ZERO)? => continue,
+                Handled::Ignored => break,
             }
         }
     }
     Ok(())
+}
+
+pub enum Handled {
+    Quit,
+    Changed,
+    Ignored,
+}
+impl App {
+    pub fn event(&mut self, event: Event) -> Result<Handled> {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        let code = match event {
+            Event::Key(key) => {
+                return Ok(if self.key(key)? {
+                    Handled::Quit
+                } else {
+                    Handled::Changed
+                });
+            }
+            Event::Resize(..) => return Ok(Handled::Changed),
+            Event::Mouse(m) => match m.kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    self.click(m.column, m.row)?;
+                    return Ok(Handled::Changed);
+                }
+                MouseEventKind::ScrollDown if self.screen == Screen::Timeline => KeyCode::Right,
+                MouseEventKind::ScrollDown => KeyCode::Down,
+                MouseEventKind::ScrollUp if self.screen == Screen::Timeline => KeyCode::Left,
+                MouseEventKind::ScrollUp => KeyCode::Up,
+                _ => return Ok(Handled::Ignored),
+            },
+            _ => return Ok(Handled::Ignored),
+        };
+        self.key(KeyEvent::new(code, KeyModifiers::NONE))?;
+        Ok(Handled::Changed)
+    }
 }

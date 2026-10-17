@@ -1,6 +1,6 @@
 use crate::{
-    app::{App, Range, SOURCES},
-    args::{Provider, Screen},
+    app::{App, Click, Range, SOURCES},
+    args::{Provider, Screen, Theme},
     data::Record,
 };
 use ratatui::{
@@ -15,16 +15,64 @@ use ratatui::{
     },
 };
 
-const BG: Color = Color::Rgb(11, 16, 26);
-const PANEL: Color = Color::Rgb(17, 25, 39);
-const EDGE: Color = Color::Rgb(39, 52, 72);
-const INK: Color = Color::Rgb(220, 230, 244);
-const MUTED: Color = Color::Rgb(120, 139, 165);
-const MINT: Color = Color::Rgb(102, 232, 191);
-const GOLD: Color = Color::Rgb(247, 183, 112);
-const PURPLE: Color = Color::Rgb(178, 164, 255);
-const BLUE: Color = Color::Rgb(111, 185, 255);
-const ROSE: Color = Color::Rgb(255, 138, 178);
+/// Colors for one theme. Accents in the light palette are darker so text
+/// stays legible on white panels.
+#[derive(Clone, Copy)]
+struct Palette {
+    bg: Color,
+    panel: Color,
+    edge: Color,
+    ink: Color,
+    muted: Color,
+    mint: Color,
+    gold: Color,
+    purple: Color,
+    blue: Color,
+    rose: Color,
+    selected: Color,
+    inspected: Color,
+}
+const DARK: Palette = Palette {
+    bg: Color::Rgb(11, 16, 26),
+    panel: Color::Rgb(17, 25, 39),
+    edge: Color::Rgb(39, 52, 72),
+    ink: Color::Rgb(220, 230, 244),
+    muted: Color::Rgb(120, 139, 165),
+    mint: Color::Rgb(102, 232, 191),
+    gold: Color::Rgb(247, 183, 112),
+    purple: Color::Rgb(178, 164, 255),
+    blue: Color::Rgb(111, 185, 255),
+    rose: Color::Rgb(255, 138, 178),
+    selected: Color::Rgb(36, 47, 69),
+    inspected: Color::Rgb(58, 65, 88),
+};
+const LIGHT: Palette = Palette {
+    bg: Color::Rgb(247, 249, 252),
+    panel: Color::Rgb(255, 255, 255),
+    edge: Color::Rgb(174, 185, 201),
+    ink: Color::Rgb(24, 36, 55),
+    muted: Color::Rgb(79, 97, 119),
+    mint: Color::Rgb(0, 113, 86),
+    gold: Color::Rgb(145, 78, 0),
+    purple: Color::Rgb(98, 65, 164),
+    blue: Color::Rgb(29, 92, 171),
+    rose: Color::Rgb(172, 40, 96),
+    selected: Color::Rgb(225, 236, 249),
+    inspected: Color::Rgb(218, 231, 249),
+};
+thread_local! {
+    static PALETTE: std::cell::Cell<Palette> = const { std::cell::Cell::new(DARK) };
+}
+/// The palette of the frame being drawn; `draw` selects it from the app theme.
+fn pal() -> Palette {
+    PALETTE.with(std::cell::Cell::get)
+}
+/// Background and text colors of a theme, for the SVG preview exporter.
+#[cfg(test)]
+pub fn base_colors(theme: Theme) -> (Color, Color) {
+    let p = if theme == Theme::Light { LIGHT } else { DARK };
+    (p.bg, p.ink)
+}
 fn style(c: Color) -> Style {
     Style::default().fg(c)
 }
@@ -34,37 +82,93 @@ fn bold(c: Color) -> Style {
 fn block(title: impl Into<Line<'static>>) -> Block<'static> {
     Block::default()
         .title(title)
-        .title_style(bold(INK))
+        .title_style(bold(pal().ink))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(style(EDGE))
-        .style(Style::default().bg(PANEL))
+        .border_style(style(pal().edge))
+        .style(Style::default().bg(pal().panel))
         .padding(Padding::horizontal(1))
 }
-const SOURCE_COLORS: [Color; SOURCES] = [MINT, GOLD, ROSE];
+fn source_colors() -> [Color; SOURCES] {
+    let p = pal();
+    [p.mint, p.gold, p.rose]
+}
 fn accent(p: &str) -> Color {
-    SOURCE_COLORS[Provider::slot(p)]
+    source_colors()[Provider::slot(p)]
 }
 /// Display name and accent for a source slot.
 fn source(p: usize) -> (&'static str, Color) {
-    (Provider::SOURCES[p].label(), SOURCE_COLORS[p])
+    (Provider::SOURCES[p].label(), source_colors()[p])
 }
-fn source_chips(app: &App) -> Vec<Span<'static>> {
-    let mut spans = vec![chip(
-        "1 All".into(),
-        app.args.provider == Provider::All,
-        PURPLE,
-    )];
+/// Lays out spans left to right from `x`, recording a click target for each
+/// span that has one. Width is measured in terminal cells, not bytes.
+struct ChipRow {
+    spans: Vec<Span<'static>>,
+    targets: Vec<(u16, u16, Click)>,
+    width: u16,
+}
+impl ChipRow {
+    fn new() -> Self {
+        Self {
+            spans: Vec::new(),
+            targets: Vec::new(),
+            width: 0,
+        }
+    }
+    fn push(&mut self, span: Span<'static>, click: Option<Click>) {
+        let w = span.width() as u16;
+        if let Some(c) = click {
+            self.targets.push((self.width, w, c));
+        }
+        self.width = self.width.saturating_add(w);
+        self.spans.push(span);
+    }
+    /// Render in `area`, aligned left or right, and keep the visible targets.
+    fn render(self, f: &mut Frame, area: Rect, right: bool, app: &mut App) {
+        let x0 = if right {
+            area.x + area.width.saturating_sub(self.width)
+        } else {
+            area.x
+        };
+        for (dx, w, c) in self.targets {
+            let x = x0.saturating_add(dx);
+            let w = w.min(area.right().saturating_sub(x));
+            if w > 0 {
+                app.hits.push((Rect::new(x, area.y, w, 1), c));
+            }
+        }
+        let p = Paragraph::new(Line::from(self.spans));
+        f.render_widget(
+            if right {
+                p.alignment(Alignment::Right)
+            } else {
+                p
+            },
+            Rect::new(area.x, area.y, area.width, area.height.min(1)),
+        );
+    }
+}
+fn source_chips(app: &App, row: &mut ChipRow) {
+    row.push(
+        chip(
+            "1 All".into(),
+            app.args.provider == Provider::All,
+            pal().purple,
+        ),
+        Some(Click::Source(Provider::All)),
+    );
     for p in app.visible_sources() {
         let (name, color) = source(p);
-        spans.push(Span::raw(" "));
-        spans.push(chip(
-            format!("{} {name}", p + 2),
-            app.args.provider == Provider::SOURCES[p],
-            color,
-        ));
+        row.push(Span::raw(" "), None);
+        row.push(
+            chip(
+                format!("{} {name}", p + 2),
+                app.args.provider == Provider::SOURCES[p],
+                color,
+            ),
+            Some(Click::Source(Provider::SOURCES[p])),
+        );
     }
-    spans
 }
 pub fn compact(n: u64) -> String {
     if n >= 1_000_000 {
@@ -91,30 +195,37 @@ pub fn grouped(n: impl std::fmt::Display) -> String {
 }
 fn key(k: &str, label: &str) -> Line<'static> {
     Line::from(vec![
-        Span::styled(format!(" {k} "), bold(BG).bg(MUTED)),
-        Span::styled(format!(" {label}  "), style(MUTED)),
+        Span::styled(format!(" {k} "), bold(pal().bg).bg(pal().muted)),
+        Span::styled(format!(" {label}  "), style(pal().muted)),
     ])
 }
 fn chip(label: String, active: bool, color: Color) -> Span<'static> {
     Span::styled(
         format!(" {label} "),
         if active {
-            bold(BG).bg(color)
+            bold(pal().bg).bg(color)
         } else {
-            style(MUTED).bg(PANEL)
+            style(pal().muted).bg(pal().panel)
         },
     )
 }
 
 pub fn draw(f: &mut Frame, app: &mut App) {
+    PALETTE.with(|p| {
+        p.set(if app.args.theme == Theme::Light {
+            LIGHT
+        } else {
+            DARK
+        })
+    });
     let area = f.area();
-    app.view_tabs.clear();
+    app.hits.clear();
     f.render_widget(
-        Block::default().style(Style::default().bg(BG).fg(INK)),
+        Block::default().style(Style::default().bg(pal().bg).fg(pal().ink)),
         area,
     );
     if area.width < 60 || area.height < 20 {
-        f.render_widget(Paragraph::new("TOKEN SPEED\n\nA little more room, please.\nMinimum 60 × 20 · Recommended 120 × 40\n\nResize the terminal or press q to exit.").style(style(MINT)).alignment(Alignment::Center).wrap(Wrap{trim:true}),area);
+        f.render_widget(Paragraph::new("TOKEN SPEED\n\nA little more room, please.\nMinimum 60 × 20 · Recommended 120 × 40\n\nResize the terminal or press q to exit.").style(style(pal().mint)).alignment(Alignment::Center).wrap(Wrap{trim:true}),area);
         return;
     }
     let layout = Layout::vertical([
@@ -146,13 +257,18 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             ("?", "help"),
         ]
     } else {
-        let mut items = vec![("Tab", "view"), ("1/2/3", "source"), ("d", "range")];
+        let mut items = vec![("Tab", "view"), ("1-4", "source"), ("d", "range")];
         if app.screen == Screen::Timeline {
             items.extend([("←/→", "inspect"), ("g", "split/overlay")]);
         } else {
             items.extend([("↑/↓", "select"), ("Enter", "details")]);
         }
-        items.extend([("/", "filter"), ("?", "help"), ("q", "quit")]);
+        items.extend([
+            ("/", "filter"),
+            ("T", "theme"),
+            ("?", "help"),
+            ("q", "quit"),
+        ]);
         items
     };
     let spans = items
@@ -174,14 +290,14 @@ fn header(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(
         Paragraph::new(vec![
             Line::from(vec![
-                Span::styled(" ◈ ", bold(MINT)),
-                Span::styled("TOKEN", bold(INK)),
-                Span::styled(" SPEED", bold(MINT)),
-                Span::styled("  /  observatory", style(MUTED)),
+                Span::styled(" ◈ ", bold(pal().mint)),
+                Span::styled("TOKEN", bold(pal().ink)),
+                Span::styled(" SPEED", bold(pal().mint)),
+                Span::styled("  /  observatory", style(pal().muted)),
             ]),
             Line::from(Span::styled(
                 "   Codex + Claude + DSH  ·  local token telemetry",
-                style(MUTED),
+                style(pal().muted),
             )),
         ]),
         columns[0],
@@ -196,10 +312,13 @@ fn header(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(
         Paragraph::new(vec![
             Line::from(vec![
-                Span::styled(state, bold(if app.paused { GOLD } else { MINT })),
                 Span::styled(
-                    format!("  Rust · v{}", env!("CARGO_PKG_VERSION")),
-                    style(MUTED),
+                    state,
+                    bold(if app.paused { pal().gold } else { pal().mint }),
+                ),
+                Span::styled(
+                    format!("  Light · v{}", env!("CARGO_PKG_VERSION")),
+                    style(pal().muted),
                 ),
             ]),
             Line::from(Span::styled(
@@ -208,48 +327,45 @@ fn header(f: &mut Frame, area: Rect, app: &App) {
                     app.clock.format(now, "%b %d · %H:%M:%S"),
                     app.clock.label()
                 ),
-                style(MUTED),
+                style(pal().muted),
             )),
         ])
         .alignment(Alignment::Right),
         columns[1],
     );
 }
-fn toolbar(f: &mut Frame, area: Rect, app: &App) {
+fn toolbar(f: &mut Frame, area: Rect, app: &mut App) {
     if area.width < 100 {
-        f.render_widget(
-            Paragraph::new(Line::from(
-                source_chips(app)
-                    .into_iter()
-                    .chain([
-                        Span::styled("  WINDOW ", style(MUTED)),
-                        chip(app.range.label().into(), true, PURPLE),
-                        Span::styled("  d to change", style(MUTED)),
-                    ])
-                    .collect::<Vec<_>>(),
-            )),
-            area,
+        let mut row = ChipRow::new();
+        source_chips(app, &mut row);
+        row.push(Span::styled("  WINDOW ", style(pal().muted)), None);
+        row.push(
+            chip(app.range.label().into(), true, pal().purple),
+            Some(Click::CycleRange),
         );
+        row.push(Span::styled("  d to change", style(pal().muted)), None);
+        row.render(f, area, false, app);
         return;
     }
     let halves =
         Layout::horizontal([Constraint::Percentage(46), Constraint::Percentage(54)]).split(area);
-    let mut left = vec![Span::styled(" SOURCE  ", style(MUTED))];
-    left.extend(source_chips(app));
-    let left = Line::from(left);
-    f.render_widget(Paragraph::new(left), halves[0]);
-    let mut spans = vec![Span::styled(" WINDOW  ", style(MUTED))];
+    let mut left = ChipRow::new();
+    left.push(Span::styled(" SOURCE  ", style(pal().muted)), None);
+    source_chips(app, &mut left);
+    left.render(f, halves[0], false, app);
+    let mut right = ChipRow::new();
+    right.push(Span::styled(" WINDOW  ", style(pal().muted)), None);
     for r in [Range::Today, Range::Week, Range::Month, Range::All] {
-        spans.push(chip(r.label().into(), r == app.range, PURPLE));
-        spans.push(Span::raw(" "));
+        right.push(
+            chip(r.label().into(), r == app.range, pal().purple),
+            Some(Click::Range(r)),
+        );
+        right.push(Span::raw(" "), None);
     }
     if app.range == Range::Custom {
-        spans.push(chip("Custom".into(), true, PURPLE));
+        right.push(chip("Custom".into(), true, pal().purple), None);
     }
-    f.render_widget(
-        Paragraph::new(Line::from(spans)).alignment(Alignment::Right),
-        halves[1],
-    );
+    right.render(f, halves[1], true, app);
 }
 fn card(
     f: &mut Frame,
@@ -265,10 +381,10 @@ fn card(
     f.render_widget(b, area);
     let mut lines = vec![Line::from(vec![
         Span::styled(value, bold(color)),
-        Span::styled(format!("  {unit}"), style(MUTED)),
+        Span::styled(format!("  {unit}"), style(pal().muted)),
     ])];
     if area.height >= 5 {
-        lines.push(Line::from(Span::styled(note, style(MUTED))));
+        lines.push(Line::from(Span::styled(note, style(pal().muted))));
     }
     f.render_widget(Paragraph::new(lines), inner);
 }
@@ -299,7 +415,7 @@ fn kpis(f: &mut Frame, area: Rect, app: &App) {
         compact(app.view.totals.output_tokens),
         "tokens",
         format!("{} total requests", app.view.totals.requests),
-        BLUE,
+        pal().blue,
     );
     let percent = if app.view.totals.requests > 0 {
         app.view.totals.timed_requests as f64 / app.view.totals.requests as f64 * 100.0
@@ -316,10 +432,10 @@ fn kpis(f: &mut Frame, area: Rect, app: &App) {
             "{} / {} requests",
             app.view.totals.timed_requests, app.view.totals.requests
         ),
-        PURPLE,
+        pal().purple,
     );
 }
-fn trend(f: &mut Frame, area: Rect, app: &App, providers: &[usize]) {
+fn trend(f: &mut Frame, area: Rect, app: &mut App, providers: &[usize]) {
     let mut lines: [Vec<Vec<(f64, f64)>>; SOURCES] = Default::default();
     // Missing bins break the line. A gap is not zero throughput.
     for &p in providers {
@@ -371,7 +487,7 @@ fn trend(f: &mut Frame, area: Rect, app: &App, providers: &[usize]) {
             Dataset::default()
                 .marker(symbols::Marker::Braille)
                 .graph_type(GraphType::Line)
-                .style(style(EDGE))
+                .style(style(pal().edge))
                 .data(&cursor_line),
         );
     }
@@ -390,7 +506,7 @@ fn trend(f: &mut Frame, area: Rect, app: &App, providers: &[usize]) {
         datasets.push(
             Dataset::default()
                 .marker(symbols::Marker::Dot)
-                .style(bold(INK))
+                .style(bold(pal().ink))
                 .data(points),
         );
     }
@@ -407,14 +523,15 @@ fn trend(f: &mut Frame, area: Rect, app: &App, providers: &[usize]) {
         app.view.chart_start + xmax * 0.5 * app.view.bucket_seconds,
         app.view.chart_start + xmax * app.view.bucket_seconds,
     ]
-    .map(|t| Line::styled(app.clock.format(t, time_fmt), style(MUTED)));
+    .map(|t| Line::styled(app.clock.format(t, time_fmt), style(pal().muted)));
+    let first_label = labels[0].width() as u16;
     let title = Line::from(vec![
         Span::styled(
             match providers {
                 [p] => format!(" {} ", source(*p).0.to_uppercase()),
                 _ => " THROUGHPUT ".into(),
             },
-            bold(INK),
+            bold(pal().ink),
         ),
         Span::styled(
             format!(
@@ -425,7 +542,7 @@ fn trend(f: &mut Frame, area: Rect, app: &App, providers: &[usize]) {
                     format!("{}d bins", (app.view.bucket_seconds / 86400.0) as u64)
                 }
             ),
-            style(MUTED),
+            style(pal().muted),
         ),
     ]);
     let b = block(title);
@@ -438,24 +555,45 @@ fn trend(f: &mut Frame, area: Rect, app: &App, providers: &[usize]) {
     };
     let rows = Layout::vertical([Constraint::Min(3), Constraint::Length(strip)]).split(inside);
     let chart = Chart::new(datasets)
-        .style(Style::default().bg(PANEL))
+        .style(Style::default().bg(pal().panel))
         .x_axis(
             Axis::default()
-                .style(style(EDGE))
+                .style(style(pal().edge))
                 .bounds([0.0, xmax])
                 .labels(labels),
         )
         .y_axis(
             Axis::default()
-                .style(style(EDGE))
+                .style(style(pal().edge))
                 .bounds([0.0, upper])
                 .labels([
-                    Line::styled("0", style(MUTED)),
-                    Line::styled(format!("{:.0}", upper / 2.0), style(MUTED)),
-                    Line::styled(format!("{upper:.0}"), style(MUTED)),
+                    Line::styled("0", style(pal().muted)),
+                    Line::styled(format!("{:.0}", upper / 2.0), style(pal().muted)),
+                    Line::styled(format!("{upper:.0}"), style(pal().muted)),
                 ]),
         );
     f.render_widget(chart, rows[0]);
+    // Mirror the chart's plot area: y labels (and half the centered first x
+    // label) sit left of the axis, x labels and the axis line sit below.
+    let plot = rows[0];
+    let y_label = [upper / 2.0, upper]
+        .map(|v| format!("{v:.0}").len() as u16)
+        .into_iter()
+        .max()
+        .unwrap_or(1);
+    let left = y_label.max(first_label / 2).min(plot.width / 3) + 1;
+    let (x0, width) = (plot.x + left, plot.width.saturating_sub(left));
+    let count = app.view.bins.len();
+    if plot.height > 2 && width > 0 && count > 0 {
+        for dx in 0..width {
+            // Point i sits at i / (count - 1) of the width; pick the nearest.
+            let i = ((dx as f64 + 0.5) / width as f64 * xmax).round() as usize;
+            app.hits.push((
+                Rect::new(x0 + dx, plot.y, 1, plot.height - 2),
+                Click::Bucket(i.min(count - 1)),
+            ));
+        }
+    }
     if providers.len() == 1 {
         coverage_line(f, rows[1], app, providers[0], true);
     } else {
@@ -486,7 +624,7 @@ fn trend(f: &mut Frame, area: Rect, app: &App, providers: &[usize]) {
         let center = Rect::new(rows[0].x, rows[0].y + rows[0].height / 2, rows[0].width, 1);
         f.render_widget(
             Paragraph::new(message)
-                .style(style(MUTED))
+                .style(style(pal().muted))
                 .alignment(Alignment::Center),
             center,
         );
@@ -518,7 +656,7 @@ fn leaderboard(f: &mut Frame, area: Rect, app: &App) {
                 format!("{} ", m.provider.to_uppercase()),
                 style(accent(&m.provider)),
             ),
-            Span::styled(name, style(INK)),
+            Span::styled(name, style(pal().ink)),
         ]);
         let columns = Layout::horizontal([Constraint::Min(10), Constraint::Length(12)])
             .split(Rect::new(inner.x, y, inner.width, 1));
@@ -531,7 +669,7 @@ fn leaderboard(f: &mut Frame, area: Rect, app: &App) {
         );
         f.render_widget(
             Gauge::default()
-                .gauge_style(Style::default().fg(accent(&m.provider)).bg(EDGE))
+                .gauge_style(Style::default().fg(accent(&m.provider)).bg(pal().edge))
                 .ratio((m.tokens_per_second.unwrap_or(0.0) / max).clamp(0.0, 1.0))
                 .label("")
                 .use_unicode(true),
@@ -540,7 +678,7 @@ fn leaderboard(f: &mut Frame, area: Rect, app: &App) {
     }
     if models.is_empty() {
         f.render_widget(
-            Paragraph::new("Waiting for local telemetry…").style(style(MUTED)),
+            Paragraph::new("Waiting for local telemetry…").style(style(pal().muted)),
             inner,
         );
     }
@@ -568,7 +706,7 @@ fn activity(f: &mut Frame, area: Rect, app: &App) {
         f.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(format!("{label}  "), style(color)),
-                Span::styled(format!("{} tokens", compact(total)), style(MUTED)),
+                Span::styled(format!("{} tokens", compact(total)), style(pal().muted)),
             ])),
             Rect::new(inner.x, y, inner.width, 1),
         );
@@ -607,11 +745,11 @@ fn records_table(f: &mut Frame, area: Rect, app: &mut App) {
             } else {
                 " MODEL COMPARISON "
             },
-            bold(INK),
+            bold(pal().ink),
         ),
-        Span::styled("  ↑/↓ select · Enter to inspect ", style(MUTED)),
+        Span::styled("  ↑/↓ select · Enter to inspect ", style(pal().muted)),
     ]);
-    let header_style = style(MUTED).bg(PANEL);
+    let header_style = style(pal().muted).bg(pal().panel);
     let (headers, widths, rows): (Vec<&str>, Vec<Constraint>, Vec<Row<'static>>) =
         if app.screen != Screen::Requests {
             let rows = app.view.models.iter().map(|m| {
@@ -715,25 +853,44 @@ fn records_table(f: &mut Frame, area: Rect, app: &mut App) {
     let table = Table::new(rows, widths)
         .header(Row::new(headers).style(header_style).bottom_margin(1))
         .block(block(title))
-        .row_highlight_style(Style::default().bg(Color::Rgb(36, 47, 69)).fg(INK))
+        .row_highlight_style(Style::default().bg(pal().selected).fg(pal().ink))
         .highlight_symbol("› ")
         .column_spacing(1);
     f.render_stateful_widget(table, area, &mut app.table);
+    // Rows start below the border, header and its margin; the table scrolls
+    // so that the selection stays visible, which `offset` reflects.
+    let body = Rect::new(
+        area.x + 1,
+        area.y + 3,
+        area.width.saturating_sub(2),
+        area.height.saturating_sub(4),
+    );
+    let total = app.row_count();
+    let first = app.table.offset();
+    for i in 0..body.height as usize {
+        if first + i >= total {
+            break;
+        }
+        app.hits.push((
+            Rect::new(body.x, body.y + i as u16, body.width, 1),
+            Click::Row(first + i),
+        ));
+    }
 }
 fn status(f: &mut Frame, area: Rect, app: &App) {
     let line = if let Some(e) = &app.error {
-        Line::styled(format!(" ! {e}  ·  r to retry"), style(GOLD))
+        Line::styled(format!(" ! {e}  ·  r to retry"), style(pal().gold))
     } else if app.loading {
         let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
             [((app.started.elapsed().as_millis() / 120) % 10) as usize];
         Line::from(vec![
-            Span::styled(format!(" {spinner} "), style(MINT)),
+            Span::styled(format!(" {spinner} "), style(pal().mint)),
             Span::styled(
                 format!(
                     "Syncing · {} parsed / {} cached",
                     app.progress.0, app.progress.1
                 ),
-                style(MUTED),
+                style(pal().muted),
             ),
         ])
     } else {
@@ -744,7 +901,10 @@ fn status(f: &mut Frame, area: Rect, app: &App) {
             format!(" · filter: {}", app.search)
         };
         Line::from(vec![
-            Span::styled(" ● ", style(if app.paused { GOLD } else { MINT })),
+            Span::styled(
+                " ● ",
+                style(if app.paused { pal().gold } else { pal().mint }),
+            ),
             Span::styled(
                 format!(
                     "Estimated request throughput · gaps > {:.0}s excluded · {} files · refreshed {age}s ago{}{}",
@@ -757,7 +917,7 @@ fn status(f: &mut Frame, area: Rect, app: &App) {
                         format!(" · {} warnings (? for details)", app.meta.warnings.len())
                     }
                 ),
-                style(MUTED),
+                style(pal().muted),
             ),
         ])
     };
@@ -778,7 +938,7 @@ fn popup(f: &mut Frame, width: u16, height: u16, title: &str, lines: Vec<Line<'s
         Paragraph::new(lines)
             .block(
                 block(format!(" {title} "))
-                    .border_style(style(PURPLE))
+                    .border_style(style(pal().purple))
                     .padding(Padding::new(2, 2, 1, 1)),
             )
             .wrap(Wrap { trim: false }),
@@ -787,10 +947,11 @@ fn popup(f: &mut Frame, width: u16, height: u16, title: &str, lines: Vec<Line<'s
 }
 fn help(f: &mut Frame, app: &App) {
     let mut lines = vec![
-        Line::styled("YOUR TERMINAL, YOUR TELEMETRY", bold(MINT)),
+        Line::styled("YOUR TERMINAL, YOUR TELEMETRY", bold(pal().mint)),
         Line::raw(""),
         Line::raw("1 / 2 / 3 / 4 All / Codex / Claude / DSH"),
         Line::raw("d             Cycle the time window"),
+        Line::raw("T             Toggle dark / light theme"),
         Line::raw("t / w / m / a Today / 7 days / 30 days / All time"),
         Line::raw("Tab / Shift-Tab Cycle views · F1–F4 direct selection"),
         Line::raw("Timeline: ← → inspect bucket · g split / overlay"),
@@ -800,7 +961,7 @@ fn help(f: &mut Frame, app: &App) {
         Line::raw("Space         Pause live updates"),
         Line::raw("r             Refresh · q or Ctrl-C quits"),
         Line::raw(""),
-        Line::styled("HOW TO READ THE CHART", bold(PURPLE)),
+        Line::styled("HOW TO READ THE CHART", bold(pal().purple)),
         Line::raw("Output tokens ÷ estimated request seconds. Weighted by time."),
         Line::raw("Includes prefill, reasoning, network and residual waiting."),
         Line::raw("░ no requests · ! missing timing · colored bars = activity"),
@@ -809,13 +970,16 @@ fn help(f: &mut Frame, app: &App) {
         Line::raw(""),
         Line::styled(
             format!("Local only · {} · no model API calls", app.clock.label()),
-            style(MUTED),
+            style(pal().muted),
         ),
     ];
     if let Some(w) = app.meta.warnings.first() {
-        lines.push(Line::styled(format!("Warning: {w}"), style(GOLD)));
+        lines.push(Line::styled(format!("Warning: {w}"), style(pal().gold)));
     }
-    lines.push(Line::styled("\nPress Esc or Enter to return", style(MUTED)));
+    lines.push(Line::styled(
+        "\nPress Esc or Enter to return",
+        style(pal().muted),
+    ));
     popup(f, 74, 27, " KEYBOARD & METRICS ", lines);
 }
 fn detail(f: &mut Frame, app: &App) {
@@ -855,7 +1019,7 @@ fn detail(f: &mut Frame, app: &App) {
                 m.timed_requests, m.requests
             )),
             Line::raw(""),
-            Line::styled("Esc / Enter to return", style(MUTED)),
+            Line::styled("Esc / Enter to return", style(pal().muted)),
         ]
     } else {
         let Some(r) = app.view.rows.iter().rev().nth(i) else {
@@ -895,7 +1059,7 @@ fn record_detail(r: &Record, app: &App) -> Vec<Line<'static>> {
         Line::raw(format!("Session     {}", r.session)),
         Line::raw(format!("Response    {}", r.id)),
         Line::raw(""),
-        Line::styled("Esc / Enter to return", style(MUTED)),
+        Line::styled("Esc / Enter to return", style(pal().muted)),
     ]
 }
 fn search(f: &mut Frame, app: &App) {
@@ -905,19 +1069,18 @@ fn search(f: &mut Frame, app: &App) {
         7,
         " FILTER ",
         vec![
-            Line::styled(format!("› {}▏", app.search), bold(MINT)),
+            Line::styled(format!("› {}▏", app.search), bold(pal().mint)),
             Line::raw(""),
             Line::styled(
                 "Model or session · Enter applies · Esc clears",
-                style(MUTED),
+                style(pal().muted),
             ),
         ],
     );
 }
 
 fn navigation(f: &mut Frame, area: Rect, app: &mut App) {
-    let mut spans = Vec::new();
-    let mut x = area.x;
+    let mut row = ChipRow::new();
     for screen in Screen::ALL {
         let label = format!(
             "F{} {}",
@@ -928,18 +1091,33 @@ fn navigation(f: &mut Frame, area: Rect, app: &mut App) {
                 screen.label()
             }
         );
-        let width = (label.len() as u16 + 2).min(area.right().saturating_sub(x));
-        if width > 0 {
-            app.view_tabs.push((Rect::new(x, area.y, width, 1), screen));
-        }
-        x += label.len() as u16 + 4;
-        spans.push(chip(label, screen == app.screen, PURPLE));
-        spans.push(Span::raw("  "));
+        row.push(
+            chip(label, screen == app.screen, pal().purple),
+            Some(Click::Screen(screen)),
+        );
+        row.push(Span::raw("  "), None);
     }
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
+    let theme = format!("◐ {}", app.args.theme.label());
+    let theme_width = theme.chars().count() as u16 + 2;
+    let tabs = Rect::new(
+        area.x,
+        area.y,
+        area.width.saturating_sub(theme_width + 1),
+        area.height,
+    );
+    row.render(f, tabs, false, app);
+    if area.width > row_min_for_theme(theme_width) {
+        let mut toggle = ChipRow::new();
+        toggle.push(chip(theme, false, pal().purple), Some(Click::Theme));
+        toggle.render(f, area, true, app);
+    }
+}
+/// Hide the theme toggle on narrow terminals rather than overlap the tabs.
+fn row_min_for_theme(theme_width: u16) -> u16 {
+    52 + theme_width
 }
 
-fn overview(f: &mut Frame, area: Rect, app: &App) {
+fn overview(f: &mut Frame, area: Rect, app: &mut App) {
     let rows = Layout::vertical([
         Constraint::Length(if area.height >= 24 { 12 } else { 8 }),
         Constraint::Min(4),
@@ -1017,7 +1195,7 @@ fn provider_card(f: &mut Frame, area: Rect, app: &App, p: usize) {
     let s = &app.view.sources[p];
     let b = block(Line::from(vec![
         Span::styled(format!(" {} ", name.to_uppercase()), bold(color)),
-        Span::styled(" weighted request throughput ", style(MUTED)),
+        Span::styled(" weighted request throughput ", style(pal().muted)),
     ]))
     .border_style(style(color));
     let inner = b.inner(area);
@@ -1027,8 +1205,8 @@ fn provider_card(f: &mut Frame, area: Rect, app: &App, p: usize) {
             Paragraph::new(vec![
                 Line::styled("—", bold(color)),
                 Line::raw(""),
-                Line::styled("Hidden by source filter", style(MUTED)),
-                Line::styled("Press 1 to compare all", style(MUTED)),
+                Line::styled("Hidden by source filter", style(pal().muted)),
+                Line::styled("Press 1 to compare all", style(pal().muted)),
             ]),
             inner,
         );
@@ -1044,15 +1222,15 @@ fn provider_card(f: &mut Frame, area: Rect, app: &App, p: usize) {
     if big {
         lines.push(Line::styled(
             "estimated output tokens / second",
-            style(MUTED),
+            style(pal().muted),
         ));
     }
     lines.push(Line::from(vec![
         Span::styled(
             format!("Median {}", rate(s.median_tokens_per_second)),
-            style(INK),
+            style(pal().ink),
         ),
-        Span::styled(format!("  ·  {} requests", s.requests), style(MUTED)),
+        Span::styled(format!("  ·  {} requests", s.requests), style(pal().muted)),
     ]));
     let usable = if s.requests > 0 {
         format!(
@@ -1064,7 +1242,7 @@ fn provider_card(f: &mut Frame, area: Rect, app: &App, p: usize) {
     };
     lines.push(Line::styled(
         format!("{} output tokens · {usable}", compact(s.output_tokens)),
-        style(MUTED),
+        style(pal().muted),
     ));
     let height = lines.len() as u16;
     f.render_widget(
@@ -1089,16 +1267,16 @@ fn provider_card(f: &mut Frame, area: Rect, app: &App, p: usize) {
     }
 }
 
-fn coverage_line(f: &mut Frame, area: Rect, app: &App, p: usize, legend: bool) {
+fn coverage_line(f: &mut Frame, area: Rect, app: &mut App, p: usize, legend: bool) {
     if area.height == 0 {
         return;
     }
     let (name, color) = source(p);
     let mut spans = vec![Span::styled(format!("{name:<7}"), style(color))];
     if !app.args.provider.matches(&name.to_lowercase()) {
-        spans.push(Span::styled("hidden by source filter", style(MUTED)));
+        spans.push(Span::styled("hidden by source filter", style(pal().muted)));
     } else if app.view.bins.is_empty() {
-        spans.push(Span::styled("Waiting for local data…", style(MUTED)));
+        spans.push(Span::styled("Waiting for local data…", style(pal().muted)));
     } else {
         let cells = area.width.saturating_sub(7) as usize;
         let count = app.view.bins.len();
@@ -1113,10 +1291,14 @@ fn coverage_line(f: &mut Frame, area: Rect, app: &App, p: usize, legend: bool) {
         let shades = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
         for x in 0..cells {
             let i = x * count / cells.max(1);
+            app.hits.push((
+                Rect::new(area.x + 7 + x as u16, area.y, 1, 1),
+                Click::Bucket(i),
+            ));
             let (symbol, c) = if app.view.requests[i][p] == 0 {
-                ('░', MUTED)
+                ('░', pal().muted)
             } else if app.view.timed[i][p] == 0 {
-                ('!', GOLD)
+                ('!', pal().gold)
             } else {
                 (
                     shades[(app.view.activity[i][p] as f64 / max as f64 * 7.0).round() as usize],
@@ -1124,9 +1306,9 @@ fn coverage_line(f: &mut Frame, area: Rect, app: &App, p: usize, legend: bool) {
                 )
             };
             let bg = if app.screen == Screen::Timeline && i == app.cursor {
-                Color::Rgb(58, 65, 88)
+                pal().inspected
             } else {
-                PANEL
+                pal().panel
             };
             spans.push(Span::styled(symbol.to_string(), style(c).bg(bg)));
         }
@@ -1138,8 +1320,8 @@ fn coverage_line(f: &mut Frame, area: Rect, app: &App, p: usize, legend: bool) {
     if legend && area.height > 1 {
         f.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled("       ░ no requests", style(MUTED)),
-                Span::styled("  ! no usable timing", style(GOLD)),
+                Span::styled("       ░ no requests", style(pal().muted)),
+                Span::styled("  ! no usable timing", style(pal().gold)),
                 Span::styled("  ▁..█ output volume", style(color)),
             ])),
             Rect::new(area.x, area.y + 1, area.width, 1),
@@ -1147,7 +1329,7 @@ fn coverage_line(f: &mut Frame, area: Rect, app: &App, p: usize, legend: bool) {
     }
 }
 
-fn coverage_panel(f: &mut Frame, area: Rect, app: &App) {
+fn coverage_panel(f: &mut Frame, area: Rect, app: &mut App) {
     let b = block(" ACTIVITY MAP  ·  activity by time bucket ");
     let inner = b.inner(area);
     f.render_widget(b, area);
@@ -1170,7 +1352,7 @@ fn coverage_panel(f: &mut Frame, area: Rect, app: &App) {
         }
         if inner.height > n {
             f.render_widget(
-                Paragraph::new("░ no requests · ! no timing").style(style(MUTED)),
+                Paragraph::new("░ no requests · ! no timing").style(style(pal().muted)),
                 Rect::new(inner.x, inner.y + n, inner.width, 1),
             );
         }
@@ -1188,7 +1370,7 @@ fn coverage_panel(f: &mut Frame, area: Rect, app: &App) {
         fmt,
     );
     f.render_widget(
-        Paragraph::new(format!("{start}  →  {end}")).style(style(MUTED)),
+        Paragraph::new(format!("{start}  →  {end}")).style(style(pal().muted)),
         Rect::new(inner.x, inner.y, inner.width, 1),
     );
     for (i, &p) in sources.iter().enumerate() {
@@ -1205,13 +1387,13 @@ fn coverage_panel(f: &mut Frame, area: Rect, app: &App) {
         f.render_widget(
             Paragraph::new(vec![
                 Line::from(vec![
-                    Span::styled("░ no requests  ", style(MUTED)),
-                    Span::styled("! no usable timing  ", style(GOLD)),
-                    Span::styled("▁..█ output volume", style(MINT)),
+                    Span::styled("░ no requests  ", style(pal().muted)),
+                    Span::styled("! no usable timing  ", style(pal().gold)),
+                    Span::styled("▁..█ output volume", style(pal().mint)),
                 ]),
                 Line::styled(
                     "A quiet period is missing activity, not a measured speed of zero.",
-                    style(MUTED),
+                    style(pal().muted),
                 ),
             ])
             .wrap(Wrap { trim: true }),
@@ -1245,7 +1427,7 @@ fn overview_note(f: &mut Frame, area: Rect, app: &App) {
             app.view.models.len(),
             compact(app.view.totals.output_tokens)
         ))
-        .style(style(MUTED)),
+        .style(style(pal().muted)),
         Rect::new(inner.x, inner.y, inner.width, 1),
     );
     for (i, r) in app
@@ -1259,7 +1441,7 @@ fn overview_note(f: &mut Frame, area: Rect, app: &App) {
         let line = Line::from(vec![
             Span::styled(
                 app.clock.format(r.timestamp, "%m/%d %H:%M:%S"),
-                style(MUTED),
+                style(pal().muted),
             ),
             Span::styled(format!("  {:<6}", r.provider), style(accent(&r.provider))),
             Span::styled(
@@ -1272,7 +1454,7 @@ fn overview_note(f: &mut Frame, area: Rect, app: &App) {
                     compact(r.output_tokens),
                     short_model(&r.model)
                 ),
-                style(MUTED),
+                style(pal().muted),
             ),
         ]);
         f.render_widget(
@@ -1282,7 +1464,7 @@ fn overview_note(f: &mut Frame, area: Rect, app: &App) {
     }
 }
 
-fn timeline(f: &mut Frame, area: Rect, app: &App) {
+fn timeline(f: &mut Frame, area: Rect, app: &mut App) {
     let compact = area.height < 22;
     let visible = app.visible_sources();
     let inspector = visible.len() as u16 + if compact { 3 } else { 4 };
@@ -1318,7 +1500,7 @@ fn timeline(f: &mut Frame, area: Rect, app: &App) {
 
 fn bucket_lines(app: &App) -> Vec<Line<'static>> {
     if app.view.bins.is_empty() {
-        return vec![Line::styled("No time buckets yet", style(MUTED))];
+        return vec![Line::styled("No time buckets yet", style(pal().muted))];
     }
     let i = app.cursor.min(app.view.bins.len() - 1);
     let t = app.view.chart_start + i as f64 * app.view.bucket_seconds;
@@ -1328,7 +1510,7 @@ fn bucket_lines(app: &App) -> Vec<Line<'static>> {
             app.clock.format(t, "%m/%d %H:%M"),
             app.clock.format(t + app.view.bucket_seconds, "%m/%d %H:%M")
         ),
-        bold(INK),
+        bold(pal().ink),
     )];
     for p in app.visible_sources() {
         let (name, color) = source(p);
@@ -1353,7 +1535,7 @@ fn bucket_lines(app: &App) -> Vec<Line<'static>> {
         };
         lines.push(Line::from(vec![
             Span::styled(format!("{name:<8}"), bold(color)),
-            Span::styled(note, style(MUTED)),
+            Span::styled(note, style(pal().muted)),
         ]));
     }
     lines
@@ -1398,7 +1580,7 @@ fn model_inspector(f: &mut Frame, area: Rect, app: &App) {
             ),
             Line::styled(
                 format!("{} median tok/s", rate(m.median_tokens_per_second)),
-                style(INK),
+                style(pal().ink),
             ),
             Line::styled(
                 format!(
@@ -1406,16 +1588,16 @@ fn model_inspector(f: &mut Frame, area: Rect, app: &App) {
                     m.requests,
                     compact(m.output_tokens)
                 ),
-                style(MUTED),
+                style(pal().muted),
             ),
             Line::styled(
                 format!(
                     "{} / {} usable request intervals",
                     m.timed_requests, m.requests
                 ),
-                style(MUTED),
+                style(pal().muted),
             ),
-            Line::styled("Request distribution below →", style(MUTED)),
+            Line::styled("Request distribution below →", style(pal().muted)),
         ])
         .wrap(Wrap { trim: true }),
         inner,
@@ -1439,7 +1621,7 @@ fn distribution(f: &mut Frame, area: Rect, app: &App) {
     rates.sort_by(f64::total_cmp);
     if rates.is_empty() {
         f.render_widget(
-            Paragraph::new("No usable request timing").style(style(MUTED)),
+            Paragraph::new("No usable request timing").style(style(pal().muted)),
             inner,
         );
         return;
@@ -1469,10 +1651,10 @@ fn distribution(f: &mut Frame, area: Rect, app: &App) {
             Constraint::Length(5),
         ])
         .split(Rect::new(inner.x, inner.y + i as u16, inner.width, 1));
-        f.render_widget(Paragraph::new(*label).style(style(MUTED)), cols[0]);
+        f.render_widget(Paragraph::new(*label).style(style(pal().muted)), cols[0]);
         f.render_widget(
             Gauge::default()
-                .gauge_style(Style::default().fg(color).bg(EDGE))
+                .gauge_style(Style::default().fg(color).bg(pal().edge))
                 .ratio(counts[i] as f64 / max as f64)
                 .label("")
                 .use_unicode(true),
@@ -1480,7 +1662,7 @@ fn distribution(f: &mut Frame, area: Rect, app: &App) {
         );
         f.render_widget(
             Paragraph::new(counts[i].to_string())
-                .style(style(INK))
+                .style(style(pal().ink))
                 .alignment(Alignment::Right),
             cols[2],
         );
@@ -1491,13 +1673,16 @@ fn distribution(f: &mut Frame, area: Rect, app: &App) {
             Paragraph::new(vec![
                 Line::styled(
                     format!("{} timed requests · speed buckets in tok/s", rates.len()),
-                    style(MUTED),
+                    style(pal().muted),
                 ),
                 Line::styled(
                     format!("P50 {}  ·  P90 {p90:.1}", rate(m.median_tokens_per_second)),
                     bold(color),
                 ),
-                Line::styled("Individual requests, not time-weighted bins.", style(MUTED)),
+                Line::styled(
+                    "Individual requests, not time-weighted bins.",
+                    style(pal().muted),
+                ),
             ])
             .wrap(Wrap { trim: true }),
             Rect::new(inner.x, inner.y + 7, inner.width, inner.height - 7),
@@ -1526,7 +1711,10 @@ fn request_view(f: &mut Frame, area: Rect, app: &mut App) {
             Paragraph::new({
                 let mut lines = record_detail(r, app);
                 lines.pop();
-                lines.push(Line::styled("↑/↓ select · Enter to inspect", style(MUTED)));
+                lines.push(Line::styled(
+                    "↑/↓ select · Enter to inspect",
+                    style(pal().muted),
+                ));
                 lines
             })
             .wrap(Wrap { trim: true }),
@@ -1563,29 +1751,39 @@ fn context_plot(f: &mut Frame, area: Rect, app: &App) {
     let rows = Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).split(inner);
     f.render_widget(
         Chart::new(vec![d])
-            .style(Style::default().bg(PANEL))
-            .x_axis(Axis::default().style(style(EDGE)).bounds([0.0, x]).labels([
-                Line::styled("0", style(MUTED)),
-                Line::styled(format!("{:.0}K", x / 2.0), style(MUTED)),
-                Line::styled(format!("{x:.0}K"), style(MUTED)),
-            ]))
-            .y_axis(Axis::default().style(style(EDGE)).bounds([0.0, y]).labels([
-                Line::styled("0", style(MUTED)),
-                Line::styled(format!("{:.0}", y / 2.0), style(MUTED)),
-                Line::styled(format!("{y:.0}"), style(MUTED)),
-            ])),
+            .style(Style::default().bg(pal().panel))
+            .x_axis(
+                Axis::default()
+                    .style(style(pal().edge))
+                    .bounds([0.0, x])
+                    .labels([
+                        Line::styled("0", style(pal().muted)),
+                        Line::styled(format!("{:.0}K", x / 2.0), style(pal().muted)),
+                        Line::styled(format!("{x:.0}K"), style(pal().muted)),
+                    ]),
+            )
+            .y_axis(
+                Axis::default()
+                    .style(style(pal().edge))
+                    .bounds([0.0, y])
+                    .labels([
+                        Line::styled("0", style(pal().muted)),
+                        Line::styled(format!("{:.0}", y / 2.0), style(pal().muted)),
+                        Line::styled(format!("{y:.0}"), style(pal().muted)),
+                    ]),
+            ),
         rows[0],
     );
     f.render_widget(
         Paragraph::new("X: input tokens incl. cache · Y: request tok/s")
-            .style(style(MUTED))
+            .style(style(pal().muted))
             .alignment(Alignment::Center),
         rows[1],
     );
     if points.is_empty() {
         f.render_widget(
             Paragraph::new("No usable request timing")
-                .style(style(MUTED))
+                .style(style(pal().muted))
                 .alignment(Alignment::Center),
             Rect::new(rows[0].x, rows[0].y + rows[0].height / 2, rows[0].width, 1),
         );

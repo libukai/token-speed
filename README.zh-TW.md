@@ -95,6 +95,8 @@ token-speed --today --view models
 | 按鍵 | 功能 |
 | --- | --- |
 | `1` / `2` / `3` / `4` | 全部／Codex／Claude／DSH（有 DSH 紀錄時顯示） |
+| `T` | 切換深色／淺色主題（也可用 `--theme light` 或 `TOKEN_SPEED_THEME`） |
+| 滑鼠 | 點擊分頁、來源、時間範圍、表格列（再點一次開詳情）、圖表時段與 `◐` 主題；滾輪捲動 |
 | `d` | 循環切換時間範圍 |
 | `t` / `w` / `m` / `a` | 今日／7 天／30 天／全部 |
 | `Tab` / `Shift-Tab` / `v` | 下一個／上一個 view |

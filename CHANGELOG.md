@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Dark / light themes: `--theme`, `TOKEN_SPEED_THEME`, `T`, or the `◐` toggle.
+- Mouse: source, time-window and theme chips, table rows and chart buckets are clickable; clicks also close dialogs and keep a typed filter.
+- Fix: clicks lagged or missed after pointer movement. Only press / release / wheel reporting is enabled, and events that change nothing no longer trigger a redraw each.
 - DSH (DeepSeek Harness) source: reads `~/.dsh/sessions` zstd session logs, times each model step, and adds a fourth source to the TUI and reports.
 
 ## [0.3.1](https://github.com/william1010121/token-speed/releases/tag/v0.3.1) — 2026-10-08

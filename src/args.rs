@@ -55,6 +55,27 @@ pub enum Format {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub enum Theme {
+    #[default]
+    Dark,
+    Light,
+}
+impl Theme {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Dark => "Dark",
+            Self::Light => "Light",
+        }
+    }
+    pub fn toggled(self) -> Self {
+        match self {
+            Self::Dark => Self::Light,
+            Self::Light => Self::Dark,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 pub enum Screen {
     #[default]
     Overview,
@@ -93,6 +114,14 @@ pub struct Args {
         help = "Initial TUI view"
     )]
     pub view: Screen,
+    #[arg(
+        long,
+        value_enum,
+        default_value = "dark",
+        env = "TOKEN_SPEED_THEME",
+        help = "TUI color theme; T toggles it while running"
+    )]
+    pub theme: Theme,
     #[arg(long, value_enum, default_value = "all")]
     pub provider: Provider,
     #[arg(long, value_enum, default_value = "day")]
