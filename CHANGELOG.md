@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- DSH (DeepSeek Harness) source: reads `~/.dsh/sessions` zstd session logs, times each model step, and adds a fourth source to the TUI and reports.
+
 ## [0.3.1](https://github.com/william1010121/token-speed/releases/tag/v0.3.1) — 2026-10-08
 
 - npm packages with checksum-verified native binaries and a lightweight launcher.

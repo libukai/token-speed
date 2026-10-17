@@ -94,7 +94,7 @@ token-speed --today --view models
 
 | 按鍵 | 功能 |
 | --- | --- |
-| `1` / `2` / `3` | 全部／Codex／Claude |
+| `1` / `2` / `3` / `4` | 全部／Codex／Claude／DSH（有 DSH 紀錄時顯示） |
 | `d` | 循環切換時間範圍 |
 | `t` / `w` / `m` / `a` | 今日／7 天／30 天／全部 |
 | `Tab` / `Shift-Tab` / `v` | 下一個／上一個 view |
@@ -127,14 +127,14 @@ TUI 的最近回覆列表保留最近 200 筆，`--limit` 大於 200 時會增�
 
 ## 計算定義與資料規劃
 
-1. **來源**：Codex `$CODEX_HOME/sessions` 與 `archived_sessions`；Claude `$CLAUDE_CONFIG_DIR/projects`。預設是 `~/.codex`、`~/.claude`，包含子代理自己的 `.jsonl`。可用 `--codex-dir`、`--claude-dir` 改根目錄。
+1. **來源**：Codex `$CODEX_HOME/sessions` 與 `archived_sessions`；Claude `$CLAUDE_CONFIG_DIR/projects`。預設是 `~/.codex`、`~/.claude`，包含子代理自己的 `.jsonl`。DSH（DeepSeek Harness）讀 `$DSH_HOME/sessions`（預設 `~/.dsh`）的 zstd 壓縮 `.jsonl.zstd`。可用 `--codex-dir`、`--claude-dir`、`--dsh-dir` 改根目錄。
 2. **計算單位**：每次有 usage 的模型回覆，而非整個使用者回合。一次工具往返可能产生多次模型回覆。
 3. **去重**：Codex 優先採 `token_usage_record.usage`，按 session／response ID 去重，排除父紀錄中鏡射的其他 thread usage。同一檔案有新格式時忽略舊 `token_count`。只有舊格式時採累積差額，跳過重複快照；累積重置採 `last_token_usage`。Claude 按 session／message ID 合併內容區塊，usage 欄位取最大值，完成時間採最後區塊；跨檔再去重。
-4. **時間區間**：Codex 用 user／task start、工具結果或前次 usage 到本次 usage。Claude 沿 `parentUuid` 找同一 branch 的 user（包括 tool result）或前次模型回覆，採前次回覆最後區塊時間，避免混入平行 branch。
+4. **時間區間**：Codex 用 user／task start、工具結果或前次 usage 到本次 usage。Claude 沿 `parentUuid` 找同一 branch 的 user（包括 tool result）或前次模型回覆，採前次回覆最後區塊時間，避免混入平行 branch。DSH 每個 `step` 是一次模型呼叫，從 `step/start` 到該 step 的 `assistant/message`，不含工具執行時間。
 5. **速度**：`output_tokens / estimated_request_seconds`。包含 prefill、reasoning、網路、重試和仍無法分離的等待；它是估計請求吞吐量，不能解讀成純 decode tokens/s。reasoning 已包含於 output，不再額外加總。
 6. **不計速度的資料**：沒有起點、非正時間或超過 `--max-gap`（預設 300 秒）的區間，速度顯示 `—`；usage 仍計入。長時間真實模型請求也可能被排除，門檻可調。
 7. **聚合**：`有效 output tokens 總和 / 有效區間秒數總和`；Median 為各有效請求速度的中位數。平行請求各自累計區間，秒數不是整體牆鐘時間。不同 tokenizer、上下文與 reasoning 工作量會影響結果，供應商比較不是受控 benchmark。
-8. **Input**：Codex input 已包含 cache；Claude 的 input 加上 cache read 與 cache write。Cached 是 input 的子集。JSON／CSV 保留 input、cached、cache write、output、reasoning、有效秒數與時間品質。
+8. **Input**：Codex input 已包含 cache；Claude 與 DSH 的 input 加上 cache read 與 cache write。Cached 是 input 的子集。JSON／CSV 保留 input、cached、cache write、output、reasoning、有效秒數與時間品質。
 9. **快取**：首次完整索引，後續比對路徑、檔案大小與奈秒 mtime，重讀有變動的檔案。SQLite 只保存模型、session、時間與 token metadata，不保存 prompt 或工具輸出。來源消失時不納入報表。預設 `~/.cache/token-speed/index.sqlite3`，跟隨 `XDG_CACHE_HOME`；可用 `--cache` 改位置，`--refresh` 重建。
 10. **互動更新**：索引在背景 thread 執行，更新時仍可操作 TUI。載入失敗會顯示原因並保留已有畫面，可按 `r` 重試。正在寫入的最後一行若不完整，跳過並記錄警告，下次變動時重讀。
 

@@ -1,5 +1,5 @@
 use crate::{
-    app::{App, Range},
+    app::{App, Range, SOURCES},
     args::{Provider, Screen},
     data::Record,
 };
@@ -24,6 +24,7 @@ const MINT: Color = Color::Rgb(102, 232, 191);
 const GOLD: Color = Color::Rgb(247, 183, 112);
 const PURPLE: Color = Color::Rgb(178, 164, 255);
 const BLUE: Color = Color::Rgb(111, 185, 255);
+const ROSE: Color = Color::Rgb(255, 138, 178);
 fn style(c: Color) -> Style {
     Style::default().fg(c)
 }
@@ -40,8 +41,30 @@ fn block(title: impl Into<Line<'static>>) -> Block<'static> {
         .style(Style::default().bg(PANEL))
         .padding(Padding::horizontal(1))
 }
+const SOURCE_COLORS: [Color; SOURCES] = [MINT, GOLD, ROSE];
 fn accent(p: &str) -> Color {
-    if p == "codex" { MINT } else { GOLD }
+    SOURCE_COLORS[Provider::slot(p)]
+}
+/// Display name and accent for a source slot.
+fn source(p: usize) -> (&'static str, Color) {
+    (Provider::SOURCES[p].label(), SOURCE_COLORS[p])
+}
+fn source_chips(app: &App) -> Vec<Span<'static>> {
+    let mut spans = vec![chip(
+        "1 All".into(),
+        app.args.provider == Provider::All,
+        PURPLE,
+    )];
+    for p in app.visible_sources() {
+        let (name, color) = source(p);
+        spans.push(Span::raw(" "));
+        spans.push(chip(
+            format!("{} {name}", p + 2),
+            app.args.provider == Provider::SOURCES[p],
+            color,
+        ));
+    }
+    spans
 }
 pub fn compact(n: u64) -> String {
     if n >= 1_000_000 {
@@ -157,7 +180,7 @@ fn header(f: &mut Frame, area: Rect, app: &App) {
                 Span::styled("  /  observatory", style(MUTED)),
             ]),
             Line::from(Span::styled(
-                "   Codex + Claude  ·  local token telemetry",
+                "   Codex + Claude + DSH  ·  local token telemetry",
                 style(MUTED),
             )),
         ]),
@@ -195,38 +218,25 @@ fn header(f: &mut Frame, area: Rect, app: &App) {
 fn toolbar(f: &mut Frame, area: Rect, app: &App) {
     if area.width < 100 {
         f.render_widget(
-            Paragraph::new(Line::from(vec![
-                chip("1 All".into(), app.args.provider == Provider::All, PURPLE),
-                Span::raw(" "),
-                chip("2 Codex".into(), app.args.provider == Provider::Codex, MINT),
-                Span::raw(" "),
-                chip(
-                    "3 Claude".into(),
-                    app.args.provider == Provider::Claude,
-                    GOLD,
-                ),
-                Span::styled("  WINDOW ", style(MUTED)),
-                chip(app.range.label().into(), true, PURPLE),
-                Span::styled("  d to change", style(MUTED)),
-            ])),
+            Paragraph::new(Line::from(
+                source_chips(app)
+                    .into_iter()
+                    .chain([
+                        Span::styled("  WINDOW ", style(MUTED)),
+                        chip(app.range.label().into(), true, PURPLE),
+                        Span::styled("  d to change", style(MUTED)),
+                    ])
+                    .collect::<Vec<_>>(),
+            )),
             area,
         );
         return;
     }
     let halves =
         Layout::horizontal([Constraint::Percentage(46), Constraint::Percentage(54)]).split(area);
-    let left = Line::from(vec![
-        Span::styled(" SOURCE  ", style(MUTED)),
-        chip("1 All".into(), app.args.provider == Provider::All, PURPLE),
-        Span::raw(" "),
-        chip("2 Codex".into(), app.args.provider == Provider::Codex, MINT),
-        Span::raw(" "),
-        chip(
-            "3 Claude".into(),
-            app.args.provider == Provider::Claude,
-            GOLD,
-        ),
-    ]);
+    let mut left = vec![Span::styled(" SOURCE  ", style(MUTED))];
+    left.extend(source_chips(app));
+    let left = Line::from(left);
     f.render_widget(Paragraph::new(left), halves[0]);
     let mut spans = vec![Span::styled(" WINDOW  ", style(MUTED))];
     for r in [Range::Today, Range::Week, Range::Month, Range::All] {
@@ -263,30 +273,28 @@ fn card(
     f.render_widget(Paragraph::new(lines), inner);
 }
 fn kpis(f: &mut Frame, area: Rect, app: &App) {
-    let cols = Layout::horizontal([Constraint::Ratio(1, 4); 4])
+    let sources = app.visible_sources();
+    let n = sources.len() as u32 + 2;
+    let cols = Layout::horizontal((0..n).map(|_| Constraint::Ratio(1, n)))
         .spacing(1)
         .split(area);
+    for (i, &p) in sources.iter().enumerate() {
+        let (name, color) = source(p);
+        let s = &app.view.sources[p];
+        card(
+            f,
+            cols[i],
+            &name.to_uppercase(),
+            rate(s.tokens_per_second),
+            "tok/s",
+            format!("{} requests · weighted", s.requests),
+            color,
+        );
+    }
+    let cols = &cols[sources.len()..];
     card(
         f,
         cols[0],
-        "CODEX",
-        rate(app.view.codex.tokens_per_second),
-        "tok/s",
-        format!("{} requests · weighted", app.view.codex.requests),
-        MINT,
-    );
-    card(
-        f,
-        cols[1],
-        "CLAUDE",
-        rate(app.view.claude.tokens_per_second),
-        "tok/s",
-        format!("{} requests · weighted", app.view.claude.requests),
-        GOLD,
-    );
-    card(
-        f,
-        cols[2],
         "OUTPUT",
         compact(app.view.totals.output_tokens),
         "tokens",
@@ -300,7 +308,7 @@ fn kpis(f: &mut Frame, area: Rect, app: &App) {
     };
     card(
         f,
-        cols[3],
+        cols[1],
         "TIMING",
         format!("{percent:.0}%"),
         "usable",
@@ -312,13 +320,10 @@ fn kpis(f: &mut Frame, area: Rect, app: &App) {
     );
 }
 fn trend(f: &mut Frame, area: Rect, app: &App, providers: &[usize]) {
-    let mut codex: Vec<Vec<(f64, f64)>> = Vec::new();
-    let mut claude: Vec<Vec<(f64, f64)>> = Vec::new();
+    let mut lines: [Vec<Vec<(f64, f64)>>; SOURCES] = Default::default();
     // Missing bins break the line. A gap is not zero throughput.
-    for (p, segments) in [(0, &mut codex), (1, &mut claude)] {
-        if !providers.contains(&p) {
-            continue;
-        }
+    for &p in providers {
+        let segments = &mut lines[p];
         let mut current = Vec::new();
         for (i, values) in app.view.bins.iter().enumerate() {
             if let Some(v) = values[p] {
@@ -332,7 +337,8 @@ fn trend(f: &mut Frame, area: Rect, app: &App, providers: &[usize]) {
         }
     }
     let mut datasets = Vec::new();
-    for (p, segments, color) in [("Codex", &codex, MINT), ("Claude", &claude, GOLD)] {
+    for (p, segments) in lines.iter().enumerate() {
+        let (name, color) = source(p);
         for (i, points) in segments.iter().enumerate() {
             let mut d = Dataset::default()
                 .marker(symbols::Marker::Braille)
@@ -344,7 +350,7 @@ fn trend(f: &mut Frame, area: Rect, app: &App, providers: &[usize]) {
                 .style(style(color))
                 .data(points);
             if i == 0 {
-                d = d.name(p);
+                d = d.name(name);
             }
             datasets.push(d);
         }
@@ -404,12 +410,9 @@ fn trend(f: &mut Frame, area: Rect, app: &App, providers: &[usize]) {
     .map(|t| Line::styled(app.clock.format(t, time_fmt), style(MUTED)));
     let title = Line::from(vec![
         Span::styled(
-            if providers == [0] {
-                " CODEX "
-            } else if providers == [1] {
-                " CLAUDE "
-            } else {
-                " THROUGHPUT "
+            match providers {
+                [p] => format!(" {} ", source(*p).0.to_uppercase()),
+                _ => " THROUGHPUT ".into(),
             },
             bold(INK),
         ),
@@ -428,7 +431,12 @@ fn trend(f: &mut Frame, area: Rect, app: &App, providers: &[usize]) {
     let b = block(title);
     let inside = b.inner(area);
     f.render_widget(b, area);
-    let rows = Layout::vertical([Constraint::Min(3), Constraint::Length(2)]).split(inside);
+    let strip = if providers.len() == 1 {
+        2
+    } else {
+        providers.len() as u16
+    };
+    let rows = Layout::vertical([Constraint::Min(3), Constraint::Length(strip)]).split(inside);
     let chart = Chart::new(datasets)
         .style(Style::default().bg(PANEL))
         .x_axis(
@@ -551,10 +559,9 @@ fn activity(f: &mut Frame, area: Rect, app: &App) {
         .unwrap_or(1)
         .max(1);
     let mut y = inner.y;
-    for (p, label, color, total) in [
-        (0, "Codex", MINT, app.view.codex.output_tokens),
-        (1, "Claude", GOLD, app.view.claude.output_tokens),
-    ] {
+    for p in app.visible_sources() {
+        let (label, color) = source(p);
+        let total = app.view.sources[p].output_tokens;
         if y + 1 >= inner.bottom() {
             break;
         }
@@ -782,7 +789,7 @@ fn help(f: &mut Frame, app: &App) {
     let mut lines = vec![
         Line::styled("YOUR TERMINAL, YOUR TELEMETRY", bold(MINT)),
         Line::raw(""),
-        Line::raw("1 / 2 / 3     All / Codex / Claude"),
+        Line::raw("1 / 2 / 3 / 4 All / Codex / Claude / DSH"),
         Line::raw("d             Cycle the time window"),
         Line::raw("t / w / m / a Today / 7 days / 30 days / All time"),
         Line::raw("Tab / Shift-Tab Cycle views · F1–F4 direct selection"),
@@ -939,11 +946,14 @@ fn overview(f: &mut Frame, area: Rect, app: &App) {
     ])
     .spacing(1)
     .split(area);
-    let cards = Layout::horizontal([Constraint::Percentage(50); 2])
+    let sources = app.visible_sources();
+    let n = sources.len() as u32;
+    let cards = Layout::horizontal((0..n).map(|_| Constraint::Ratio(1, n)))
         .spacing(1)
         .split(rows[0]);
-    provider_card(f, cards[0], app, 0);
-    provider_card(f, cards[1], app, 1);
+    for (i, p) in sources.into_iter().enumerate() {
+        provider_card(f, cards[i], app, p);
+    }
     if area.width >= 105 && rows[1].height >= 11 {
         let halves = Layout::horizontal([Constraint::Percentage(65), Constraint::Percentage(35)])
             .spacing(1)
@@ -1003,13 +1013,10 @@ fn big_number(s: &str, color: Color) -> Vec<Line<'static>> {
 }
 
 fn provider_card(f: &mut Frame, area: Rect, app: &App, p: usize) {
-    let (name, s, color) = if p == 0 {
-        ("CODEX", &app.view.codex, MINT)
-    } else {
-        ("CLAUDE", &app.view.claude, GOLD)
-    };
+    let (name, color) = source(p);
+    let s = &app.view.sources[p];
     let b = block(Line::from(vec![
-        Span::styled(format!(" {name} "), bold(color)),
+        Span::styled(format!(" {} ", name.to_uppercase()), bold(color)),
         Span::styled(" weighted request throughput ", style(MUTED)),
     ]))
     .border_style(style(color));
@@ -1021,7 +1028,7 @@ fn provider_card(f: &mut Frame, area: Rect, app: &App, p: usize) {
                 Line::styled("—", bold(color)),
                 Line::raw(""),
                 Line::styled("Hidden by source filter", style(MUTED)),
-                Line::styled("Press 1 to compare both", style(MUTED)),
+                Line::styled("Press 1 to compare all", style(MUTED)),
             ]),
             inner,
         );
@@ -1086,11 +1093,7 @@ fn coverage_line(f: &mut Frame, area: Rect, app: &App, p: usize, legend: bool) {
     if area.height == 0 {
         return;
     }
-    let (name, color) = if p == 0 {
-        ("Codex", MINT)
-    } else {
-        ("Claude", GOLD)
-    };
+    let (name, color) = source(p);
     let mut spans = vec![Span::styled(format!("{name:<7}"), style(color))];
     if !app.args.provider.matches(&name.to_lowercase()) {
         spans.push(Span::styled("hidden by source filter", style(MUTED)));
@@ -1151,25 +1154,24 @@ fn coverage_panel(f: &mut Frame, area: Rect, app: &App) {
     if inner.height < 2 {
         return;
     }
-    if inner.height < 4 {
-        coverage_line(
-            f,
-            Rect::new(inner.x, inner.y, inner.width, 1),
-            app,
-            0,
-            false,
-        );
-        coverage_line(
-            f,
-            Rect::new(inner.x, inner.y + 1, inner.width, 1),
-            app,
-            1,
-            false,
-        );
-        if inner.height > 2 {
+    let sources = app.visible_sources();
+    let n = sources.len() as u16;
+    if inner.height < n + 2 {
+        for (i, &p) in sources.iter().enumerate() {
+            if (i as u16) < inner.height {
+                coverage_line(
+                    f,
+                    Rect::new(inner.x, inner.y + i as u16, inner.width, 1),
+                    app,
+                    p,
+                    false,
+                );
+            }
+        }
+        if inner.height > n {
             f.render_widget(
                 Paragraph::new("░ no requests · ! no timing").style(style(MUTED)),
-                Rect::new(inner.x, inner.y + 2, inner.width, 1),
+                Rect::new(inner.x, inner.y + n, inner.width, 1),
             );
         }
         return;
@@ -1189,18 +1191,17 @@ fn coverage_panel(f: &mut Frame, area: Rect, app: &App) {
         Paragraph::new(format!("{start}  →  {end}")).style(style(MUTED)),
         Rect::new(inner.x, inner.y, inner.width, 1),
     );
-    for p in 0..2 {
-        if inner.y + 1 + (p as u16) < inner.bottom() {
-            coverage_line(
-                f,
-                Rect::new(inner.x, inner.y + 1 + p as u16, inner.width, 1),
-                app,
-                p,
-                false,
-            );
-        }
+    for (i, &p) in sources.iter().enumerate() {
+        coverage_line(
+            f,
+            Rect::new(inner.x, inner.y + 1 + i as u16, inner.width, 1),
+            app,
+            p,
+            false,
+        );
     }
-    if inner.height >= 5 {
+    let legend = n + 2;
+    if inner.height > legend {
         f.render_widget(
             Paragraph::new(vec![
                 Line::from(vec![
@@ -1214,7 +1215,12 @@ fn coverage_panel(f: &mut Frame, area: Rect, app: &App) {
                 ),
             ])
             .wrap(Wrap { trim: true }),
-            Rect::new(inner.x, inner.y + 4, inner.width, inner.height - 4),
+            Rect::new(
+                inner.x,
+                inner.y + legend,
+                inner.width,
+                inner.height - legend,
+            ),
         );
     }
 }
@@ -1278,28 +1284,31 @@ fn overview_note(f: &mut Frame, area: Rect, app: &App) {
 
 fn timeline(f: &mut Frame, area: Rect, app: &App) {
     let compact = area.height < 22;
+    let visible = app.visible_sources();
+    let inspector = visible.len() as u16 + if compact { 3 } else { 4 };
     let rows = Layout::vertical([
         Constraint::Length(if compact { 0 } else { 4 }),
         Constraint::Min(4),
-        Constraint::Length(if compact { 5 } else { 6 }),
+        Constraint::Length(inspector),
     ])
     .split(area);
     if !compact {
         kpis(f, rows[0], app);
     }
     let providers: Vec<usize> = match app.args.provider {
-        Provider::All => vec![0, 1],
-        Provider::Codex => vec![0],
-        Provider::Claude => vec![1],
+        Provider::All => visible,
+        p => vec![Provider::slot(p.label())],
     };
     if compact || app.overlay || providers.len() == 1 {
         trend(f, rows[1], app, &providers);
     } else {
-        let plots = Layout::vertical([Constraint::Percentage(50); 2])
+        let n = providers.len() as u32;
+        let plots = Layout::vertical((0..n).map(|_| Constraint::Ratio(1, n)))
             .spacing(1)
             .split(rows[1]);
-        trend(f, plots[0], app, &[0]);
-        trend(f, plots[1], app, &[1]);
+        for (i, &p) in providers.iter().enumerate() {
+            trend(f, plots[i], app, &[p]);
+        }
     }
     let b = block(" BUCKET INSPECTOR  ·  ← / → to move  ·  g split / overlay ");
     let inner = b.inner(rows[2]);
@@ -1321,7 +1330,8 @@ fn bucket_lines(app: &App) -> Vec<Line<'static>> {
         ),
         bold(INK),
     )];
-    for (p, name, color) in [(0, "Codex", MINT), (1, "Claude", GOLD)] {
+    for p in app.visible_sources() {
+        let (name, color) = source(p);
         let note = if !app.args.provider.matches(&name.to_lowercase()) {
             "Hidden by source filter".into()
         } else if app.view.requests[i][p] == 0 {

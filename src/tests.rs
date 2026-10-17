@@ -453,7 +453,7 @@ fn tui_filters_pause_navigation_and_chart_gaps() {
     assert!(app.view.bins[9][1].is_some());
     press(&mut app, KeyCode::Char('2'));
     assert!(app.view.rows.iter().all(|r| r.provider == "codex"));
-    assert_eq!(app.view.claude.requests, 0);
+    assert_eq!(app.view.sources[1].requests, 0);
     press(&mut app, KeyCode::Char(' '));
     assert!(app.paused);
     press(&mut app, KeyCode::Tab);
@@ -700,4 +700,118 @@ fn four_views_preserve_filters_and_distinguish_missing_timing() {
     assert_eq!(app.cursor, 0);
     press(&mut app, KeyCode::Enter);
     assert!(app.detail);
+}
+
+fn dsh(t: u64, typ: &str, data: Value) -> String {
+    json!({"type":typ,"seq":t,"time":1_791_000_000_000u64 + t * 1000,"data":data}).to_string()
+}
+fn dsh_message(t: u64, step: u64, id: &str, output: u64) -> String {
+    dsh(
+        t,
+        "assistant/message",
+        json!({"turn":1,"step":step,"message":{"role":"assistant","id":id,
+            "source":{"kind":"model","provider":"deepseek-official","model":"deepseek-test"}},
+            "usage":{"inputTokens":10,"outputTokens":output,"cacheReadTokens":90,"reasoningTokens":40}}),
+    )
+}
+
+#[test]
+fn dsh_steps_cache_and_frames() {
+    use ruzstd::encoding::{CompressionLevel, compress_to_vec};
+    let lines = [
+        json!({"type":"session","id":"session-synthetic","createdAt":1_791_000_000_000u64})
+            .to_string(),
+        dsh(1, "turn/start", json!({"turn":1})),
+        dsh(2, "step/start", json!({"turn":1,"step":1})),
+        dsh(
+            4,
+            "tool/call",
+            json!({"turn":1,"step":1,"name":"bash","arguments":"synthetic"}),
+        ),
+        dsh_message(6, 1, "m1", 200),
+        // A mirrored message keeps maximum counters instead of adding them.
+        dsh_message(6, 1, "m1", 200),
+        dsh(7, "step/start", json!({"turn":1,"step":2})),
+        dsh_message(9, 2, "m2", 100),
+        // No step/start: usage counts, timing stays missing.
+        dsh_message(12, 3, "m3", 50),
+    ];
+    let dir = tempfile::tempdir().unwrap();
+    let session = dir.path().join("sessions/--synthetic--/session-synthetic");
+    fs::create_dir_all(&session).unwrap();
+    // DSH appends one zstd frame per write; end with a frame cut mid-write.
+    let mut bytes = Vec::new();
+    for line in &lines {
+        bytes.extend(compress_to_vec(
+            format!("{line}\n").as_bytes(),
+            CompressionLevel::Fastest,
+        ));
+    }
+    let tail = compress_to_vec(
+        dsh_message(20, 4, "m4", 999).as_bytes(),
+        CompressionLevel::Fastest,
+    );
+    bytes.extend(&tail[..tail.len() / 2]);
+    let path = session.join("session.jsonl.zstd");
+    fs::write(&path, &bytes).unwrap();
+    fs::write(session.join("session.lock"), "").unwrap();
+
+    let (rows, bad) = data::parse_file(&path, "dsh").unwrap();
+    assert_eq!(bad, 1);
+    assert_eq!(rows.len(), 3);
+    assert!(rows.iter().all(|r| r.session == "session-synthetic"));
+    assert!(rows.iter().all(|r| r.model == "deepseek-test"));
+    let (m1, m2, m3) = (&rows[0], &rows[1], &rows[2]);
+    assert_eq!((m1.output_tokens, m1.reasoning_tokens), (200, 40));
+    assert_eq!((m1.input_tokens, m1.cached_tokens), (100, 90));
+    assert_eq!(m1.rate(300.0), Some(50.0));
+    assert_eq!(m2.rate(300.0), Some(50.0));
+    assert!(m3.start.is_none());
+    let s = data::summarize(&rows, 300.0);
+    assert_eq!((s.output_tokens, s.timed_output_tokens), (350, 300));
+    assert_eq!(s.tokens_per_second, Some(50.0));
+
+    let mut args = Args::parse_from(["token-speed", "--provider", "dsh", "--all-time"]);
+    args.dsh_dir = dir.path().into();
+    args.cache = dir.path().join("index.sqlite3");
+    let (rows, meta) = data::collect(&args, |_, _| {}).unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(meta.parsed_files, 1);
+    assert!(rows.iter().all(|r| r.provider == "dsh"));
+}
+
+#[test]
+fn dsh_source_appears_once_indexed() {
+    let mut app = demo_app();
+    assert_eq!(app.visible_sources(), vec![0, 1]);
+    let mut extra = app.records[0].clone();
+    extra.provider = "dsh".into();
+    extra.id = "dsh-1".into();
+    extra.model = "deepseek-test".into();
+    app.records.push(extra);
+    app.rebuild().unwrap();
+    assert_eq!(app.visible_sources(), vec![0, 1, 2]);
+    assert_eq!(app.view.sources[2].requests, 1);
+    press(&mut app, KeyCode::Char('4'));
+    assert!(app.view.rows.iter().all(|r| r.provider == "dsh"));
+    for screen in args::Screen::ALL {
+        app.set_screen(screen);
+        for (width, height) in [(140, 46), (80, 24), (40, 12)] {
+            let mut term = Terminal::new(TestBackend::new(width, height)).unwrap();
+            term.draw(|f| ui::draw(f, &mut app)).unwrap();
+        }
+    }
+    press(&mut app, KeyCode::Char('1'));
+    app.set_screen(args::Screen::Timeline);
+    let mut term = Terminal::new(TestBackend::new(140, 46)).unwrap();
+    term.draw(|f| ui::draw(f, &mut app)).unwrap();
+    let text = term
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|c| c.symbol())
+        .collect::<String>();
+    assert!(text.contains("4 DSH"));
+    assert!(text.contains("DSH"));
 }

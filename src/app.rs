@@ -15,6 +15,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub const SOURCES: usize = Provider::SOURCES.len();
+
 pub enum Load {
     Progress(usize, usize),
     Done(Result<(Vec<Record>, Metadata)>),
@@ -42,14 +44,16 @@ pub struct View {
     pub rows: Vec<Record>,
     pub models: Vec<Summary>,
     pub totals: Summary,
-    pub codex: Summary,
-    pub claude: Summary,
-    pub bins: Vec<[Option<f64>; 2]>,
-    pub activity: Vec<[u64; 2]>,
-    pub requests: Vec<[usize; 2]>,
-    pub timed: Vec<[usize; 2]>,
+    /// Per-source summaries, indexed like `Provider::SOURCES`.
+    pub sources: [Summary; SOURCES],
+    pub bins: Vec<[Option<f64>; SOURCES]>,
+    pub activity: Vec<[u64; SOURCES]>,
+    pub requests: Vec<[usize; SOURCES]>,
+    pub timed: Vec<[usize; SOURCES]>,
     pub chart_start: f64,
     pub bucket_seconds: f64,
+    /// Sources with any indexed record, regardless of the current filters.
+    pub indexed: [bool; SOURCES],
 }
 impl Default for View {
     fn default() -> Self {
@@ -57,14 +61,14 @@ impl Default for View {
             rows: Vec::new(),
             models: Vec::new(),
             totals: Summary::default(),
-            codex: Summary::default(),
-            claude: Summary::default(),
+            sources: Default::default(),
             bins: Vec::new(),
             activity: Vec::new(),
             requests: Vec::new(),
             timed: Vec::new(),
             chart_start: 0.0,
             bucket_seconds: 3600.0,
+            indexed: [false; SOURCES],
         }
     }
 }
@@ -204,14 +208,12 @@ impl App {
             });
         }
         let totals = data::summarize(&rows, self.args.max_gap);
-        let codex = data::summarize(
-            rows.iter().filter(|r| r.provider == "codex"),
-            self.args.max_gap,
-        );
-        let claude = data::summarize(
-            rows.iter().filter(|r| r.provider == "claude"),
-            self.args.max_gap,
-        );
+        let sources = Provider::SOURCES.map(|p| {
+            data::summarize(
+                rows.iter().filter(|r| p.matches(&r.provider)),
+                self.args.max_gap,
+            )
+        });
         let mut models = data::aggregate(&rows, Group::Model, self.clock, self.args.max_gap);
         models.sort_by(|a, b| b.output_tokens.cmp(&a.output_tokens));
         let (since, until) = data::bounds(&self.args, self.clock)?;
@@ -229,14 +231,14 @@ impl App {
             (span / 48.0).ceil().max(86400.0)
         };
         let count = (span / step).ceil().clamp(1.0, 96.0) as usize;
-        let mut tokens = vec![[0u64; 2]; count];
-        let mut seconds = vec![[0.0; 2]; count];
-        let mut activity = vec![[0u64; 2]; count];
-        let mut requests = vec![[0usize; 2]; count];
-        let mut timed = vec![[0usize; 2]; count];
+        let mut tokens = vec![[0u64; SOURCES]; count];
+        let mut seconds = vec![[0.0; SOURCES]; count];
+        let mut activity = vec![[0u64; SOURCES]; count];
+        let mut requests = vec![[0usize; SOURCES]; count];
+        let mut timed = vec![[0usize; SOURCES]; count];
         for r in &rows {
             let bin = (((r.timestamp - start) / step).floor().max(0.0) as usize).min(count - 1);
-            let p = usize::from(r.provider == "claude");
+            let p = Provider::slot(&r.provider);
             activity[bin][p] += r.output_tokens;
             requests[bin][p] += 1;
             if let Some(d) = r.duration(self.args.max_gap) {
@@ -252,18 +254,22 @@ impl App {
                 })
             })
             .collect();
+        let mut indexed = [false; SOURCES];
+        for r in &self.records {
+            indexed[Provider::slot(&r.provider)] = true;
+        }
         self.view = View {
             rows,
             models,
             totals,
-            codex,
-            claude,
+            sources,
             bins,
             activity,
             requests,
             timed,
             chart_start: start,
             bucket_seconds: step,
+            indexed,
         };
         self.cursor = self.cursor.min(count.saturating_sub(1));
         let count = self.row_count();
@@ -273,6 +279,14 @@ impl App {
             None
         });
         Ok(())
+    }
+    /// Source slots to display. Codex and Claude are always shown; DSH appears
+    /// once its logs are indexed or when it is selected explicitly.
+    pub fn visible_sources(&self) -> Vec<usize> {
+        let dsh = Provider::slot("dsh");
+        (0..SOURCES)
+            .filter(|&p| p != dsh || self.args.provider == Provider::Dsh || self.view.indexed[dsh])
+            .collect()
     }
     pub fn row_count(&self) -> usize {
         if self.screen == Screen::Requests {
@@ -338,6 +352,7 @@ impl App {
             KeyCode::Char('1') => self.args.provider = Provider::All,
             KeyCode::Char('2') => self.args.provider = Provider::Codex,
             KeyCode::Char('3') => self.args.provider = Provider::Claude,
+            KeyCode::Char('4') => self.args.provider = Provider::Dsh,
             KeyCode::Char('d') => {
                 self.set_range(match self.range {
                     Range::Today => Range::Week,
@@ -404,7 +419,7 @@ impl App {
             }
             _ => {}
         }
-        if matches!(key.code, KeyCode::Char('1' | '2' | '3') | KeyCode::Esc) {
+        if matches!(key.code, KeyCode::Char('1'..='4') | KeyCode::Esc) {
             self.table.select(Some(0));
             self.rebuild()?;
         }

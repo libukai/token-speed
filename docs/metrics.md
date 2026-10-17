@@ -11,7 +11,7 @@ Median, P50 and P90 describe individual valid request rates. Overlapping request
 
 ## Timing and exclusions
 
-Codex uses a user / task start, a tool-result boundary or the previous usage event as the start. Claude follows `parentUuid` ancestry on the same branch to a user event (including tool results) or the last block of a previous assistant response.
+Codex uses a user / task start, a tool-result boundary or the previous usage event as the start. Claude follows `parentUuid` ancestry on the same branch to a user event (including tool results) or the last block of a previous assistant response. DSH records one model call per `step`: the start is that step's `step/start` event and the end is its `assistant/message`, so tool execution between steps is not included.
 
 These intervals can include prefill, reasoning, network, retries, orchestration and residual waits. Logs usually cannot isolate first-token and last-token timestamps. This is estimated request throughput, not pure decode speed. Provider tokenizers, workload, context and reasoning differ: comparisons are observational, not controlled benchmarks.
 
@@ -20,8 +20,9 @@ Missing starts, nonpositive durations and intervals above `--max-gap` (default 3
 ## Usage normalization and deduplication
 
 - **Codex:** prefer `token_usage_record.usage`, deduplicate by session / response ID, and ignore other-thread mirrors in a parent log. When a file contains modern records, legacy `token_count` is ignored. Legacy-only files use cumulative differences, skip duplicate snapshots and use `last_token_usage` after counter resets. The first legacy snapshot contributes only last usage; earlier requests are not invented.
+- **DSH:** sessions are zstd-compressed JSONL appended one frame per write; a frame cut off mid-write is skipped as an incomplete tail. Usage comes from `assistant/message` events, deduplicated by message ID with maximum counters. A message without a matching `step/start` keeps its usage but has no timing.
 - **Claude Code:** merge assistant blocks by session / message ID, take maximum usage counters and the last block timestamp, then deduplicate across files. Missing parent records retain usage but may prevent a timing estimate.
-- **Input:** Codex input already includes cache. Claude input is normalized by adding cache-read and cache-write tokens. Cached tokens are a subset of input.
+- **Input:** Codex input already includes cache. Claude and DSH input are normalized by adding cache-read and cache-write tokens. Cached tokens are a subset of input.
 - **Output:** reasoning is already included in output and must not be added again. Separate reasoning counters are kept when available.
 
 Mixed-schema Codex files can omit usage represented only by legacy events. Changed upstream schemas may require parser updates; malformed lines produce a warning count.

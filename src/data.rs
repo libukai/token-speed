@@ -1,4 +1,4 @@
-use crate::args::{Args, Group};
+use crate::args::{Args, Group, Provider};
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Duration, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use chrono_tz::Tz;
@@ -8,7 +8,7 @@ use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fs::File,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Read},
     path::Path,
     time::UNIX_EPOCH,
 };
@@ -130,7 +130,143 @@ struct Node {
     message_key: (String, String),
 }
 
+/// Decode concatenated zstd frames. DSH appends one frame per write, so a
+/// frame cut off mid-write is dropped whole and reported as an incomplete tail.
+fn inflate(mut input: &[u8]) -> (Vec<u8>, bool) {
+    use ruzstd::decoding::{BlockDecodingStrategy, FrameDecoder, errors};
+    let mut out = Vec::new();
+    let mut decoder = FrameDecoder::new();
+    while !input.is_empty() {
+        let frame_start = out.len();
+        match decoder.init(&mut input) {
+            Ok(()) => {}
+            Err(errors::FrameDecoderError::ReadFrameHeaderError(
+                errors::ReadFrameHeaderError::SkipFrame { length, .. },
+            )) => match input.get(length as usize..) {
+                Some(rest) => {
+                    input = rest;
+                    continue;
+                }
+                None => return (out, true),
+            },
+            Err(_) => return (out, true),
+        }
+        while !decoder.is_finished() {
+            let before = input.len();
+            let ok = decoder
+                .decode_blocks(&mut input, BlockDecodingStrategy::UptoBytes(1 << 20))
+                .is_ok()
+                && decoder.collect_to_writer(&mut out).is_ok();
+            if !ok || (input.len() == before && !decoder.is_finished()) {
+                out.truncate(frame_start);
+                return (out, true);
+            }
+        }
+        if decoder.collect_to_writer(&mut out).is_err() {
+            out.truncate(frame_start);
+            return (out, true);
+        }
+    }
+    (out, false)
+}
+
+pub fn is_log(path: &Path, provider: &str) -> bool {
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    name.ends_with(".jsonl")
+        || provider == "dsh" && (name.ends_with(".jsonl.zstd") || name.ends_with(".jsonl.zst"))
+}
+
+/// DSH (DeepSeek Harness) session events. Each model call is bracketed by
+/// `step/start` and an `assistant/message` carrying usage for that step.
+fn parse_dsh(path: &Path) -> Result<(Vec<Record>, usize)> {
+    let mut raw = Vec::new();
+    File::open(path)?.read_to_end(&mut raw)?;
+    let compressed = path.extension().is_some_and(|x| x == "zstd" || x == "zst");
+    let (bytes, truncated) = if compressed {
+        inflate(&raw)
+    } else {
+        (raw, false)
+    };
+    let mut session = path
+        .parent()
+        .and_then(|p| p.file_name())
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    let mut malformed = usize::from(truncated);
+    let mut steps: HashMap<(u64, u64), f64> = HashMap::new();
+    let mut messages: HashMap<String, Record> = HashMap::new();
+    for line in bytes.split(|b| *b == b'\n') {
+        if line.iter().all(u8::is_ascii_whitespace) {
+            continue;
+        }
+        let d: Value = match serde_json::from_slice::<Value>(line) {
+            Ok(v) if v.is_object() => v,
+            _ => {
+                malformed += 1;
+                continue;
+            }
+        };
+        let p = &d["data"];
+        let step = (n(p, "turn"), n(p, "step"));
+        match text(&d["type"]).unwrap_or("") {
+            "session" => session = text(&d["id"]).unwrap_or(&session).to_owned(),
+            "step/start" => {
+                if let Some(t) = stamp(&d["time"]) {
+                    steps.insert(step, t);
+                }
+            }
+            "assistant/message" if p["usage"].is_object() => {
+                let Some(end) = stamp(&d["time"]) else {
+                    continue;
+                };
+                let u = &p["usage"];
+                let cached = n(u, "cacheReadTokens");
+                let written = n(u, "cacheWriteTokens");
+                let id = text(&p["message"]["id"])
+                    .map(String::from)
+                    .unwrap_or_else(|| format!("turn-{}-step-{}", step.0, step.1));
+                let r = Record {
+                    provider: "dsh".into(),
+                    session: session.clone(),
+                    id: id.clone(),
+                    model: text(&p["message"]["source"]["model"])
+                        .unwrap_or("unknown")
+                        .into(),
+                    timestamp: end,
+                    start: steps.get(&step).copied(),
+                    // DSH reports cache reads separately from uncached input.
+                    input_tokens: n(u, "inputTokens") + cached + written,
+                    cached_tokens: cached,
+                    cache_write_tokens: written,
+                    // Reasoning is already part of output.
+                    output_tokens: n(u, "outputTokens"),
+                    reasoning_tokens: n(u, "reasoningTokens"),
+                    timing_source: "step-boundary".into(),
+                };
+                if let Some(prev) = messages.get_mut(&id) {
+                    prev.timestamp = prev.timestamp.max(r.timestamp);
+                    prev.input_tokens = prev.input_tokens.max(r.input_tokens);
+                    prev.output_tokens = prev.output_tokens.max(r.output_tokens);
+                    prev.cached_tokens = prev.cached_tokens.max(r.cached_tokens);
+                    prev.cache_write_tokens = prev.cache_write_tokens.max(r.cache_write_tokens);
+                    prev.reasoning_tokens = prev.reasoning_tokens.max(r.reasoning_tokens);
+                } else {
+                    messages.insert(id, r);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut rows: Vec<_> = messages.into_values().collect();
+    rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+    Ok((rows, malformed))
+}
+
 pub fn parse_file(path: &Path, provider: &str) -> Result<(Vec<Record>, usize)> {
+    if provider == "dsh" {
+        return parse_dsh(path);
+    }
     let mut session = path
         .file_stem()
         .unwrap_or_default()
@@ -352,6 +488,7 @@ pub fn collect(
         ("codex", args.codex_dir.join("sessions")),
         ("codex", args.codex_dir.join("archived_sessions")),
         ("claude", args.claude_dir.join("projects")),
+        ("dsh", args.dsh_dir.join("sessions")),
     ];
     let mut meta = Metadata::default();
     let mut result = HashMap::new();
@@ -361,6 +498,10 @@ pub fn collect(
             continue;
         }
         if !root.exists() {
+            // DSH is optional; only report it when explicitly requested.
+            if provider == "dsh" && args.provider == Provider::All {
+                continue;
+            }
             meta.warnings
                 .push(format!("Missing log directory: {}", root.display()));
             continue;
@@ -374,7 +515,7 @@ pub fn collect(
                 }
             };
             let path = entry.path();
-            if !entry.file_type().is_file() || path.extension().is_none_or(|x| x != "jsonl") {
+            if !entry.file_type().is_file() || !is_log(path, provider) {
                 continue;
             }
             let absolute = path.canonicalize()?;

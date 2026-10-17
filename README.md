@@ -4,7 +4,7 @@
 
 **Your coding agents, at a glance.**
 
-A terminal observatory for Codex and Claude Code.<br>
+A terminal observatory for Codex, Claude Code and DSH (DeepSeek Harness).<br>
 Four views. Local logs. One native Rust binary.
 
 [![CI](https://github.com/william1010121/token-speed/actions/workflows/ci.yml/badge.svg)](https://github.com/william1010121/token-speed/actions/workflows/ci.yml)
@@ -149,7 +149,7 @@ token-speed --provider claude --model opus --view requests
 | Key | Action |
 | --- | --- |
 | `Tab` / `Shift-Tab`, `F1`–`F4` | Switch views; navigation labels are clickable |
-| `1` / `2` / `3` | All / Codex / Claude |
+| `1` / `2` / `3` / `4` | All / Codex / Claude / DSH (shown once DSH logs exist) |
 | `t` / `w` / `m` / `a`, `d` | Today / 7 days / 30 days / all; cycle range |
 | `/`, `Esc` | Filter by model or session; close / clear |
 | `↑` / `↓`, `j` / `k`, mouse wheel | Select rows; `Home` / `End` jump to ends |
@@ -191,7 +191,7 @@ Text tables have borders, right-aligned numeric columns and, for summaries, a to
 
 | Option | Purpose |
 | --- | --- |
-| `--provider all\|codex\|claude` | Choose source |
+| `--provider all\|codex\|claude\|dsh` | Choose source |
 | `--model`, `--session` | Substring filters |
 | `--today`, `--days N`, `--all-time`, `--since`, `--until` | Time range |
 | `--timezone` | IANA timezone; defaults to `TZ` or local timezone |
@@ -199,7 +199,7 @@ Text tables have borders, right-aligned numeric columns and, for summaries, a to
 | `--table`, `--json` | One-shot text table or JSON report; bypass the TUI |
 | `--group hour\|day\|model`, `--format table\|json\|csv` | Report grouping and format |
 | `--max-gap SECONDS` | Maximum usable timing interval; default 300 |
-| `--codex-dir`, `--claude-dir`, `--cache` | Override source / index locations |
+| `--codex-dir`, `--claude-dir`, `--dsh-dir`, `--cache` | Override source / index locations |
 | `--refresh` | Rebuild cached entries |
 
 ## Your logs stay on your machine
@@ -208,6 +208,7 @@ Text tables have borders, right-aligned numeric columns and, for summaries, a to
 | --- | --- | --- |
 | Codex | `~/.codex/{sessions,archived_sessions}` | `CODEX_HOME` or `--codex-dir` |
 | Claude Code | `~/.claude/projects` | `CLAUDE_CONFIG_DIR` or `--claude-dir` |
+| DSH (DeepSeek Harness) | `~/.dsh/sessions` (`*.jsonl.zstd`) | `DSH_HOME` or `--dsh-dir` |
 | SQLite index | `~/.cache/token-speed/index.sqlite3` | `XDG_CACHE_HOME` or `--cache` |
 
 The parser includes subagent logs and deduplicates supported usage records. The cache stores token counts, timestamps, model names, session identifiers and source paths. It does **not** store prompts or tool-output bodies. Reports can contain session identifiers and file paths; redact them before sharing.
