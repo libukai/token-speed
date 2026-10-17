@@ -34,9 +34,6 @@ pub struct Spec {
     pub env: &'static str,
     /// Home directory relative to `$HOME`.
     pub home: &'static str,
-    /// Homes of apps that bundle their own copy of this tool, relative to
-    /// `$HOME`. Scanned by default when present.
-    pub embedded: &'static [&'static str],
     /// Log roots under the home directory.
     pub roots: &'static [&'static str],
     /// Hidden until its logs are indexed, and silent when its home is
@@ -53,7 +50,6 @@ const SPECS: [Spec; Source::COUNT] = [
         label: "Codex",
         env: "CODEX_HOME",
         home: ".codex",
-        embedded: &[],
         roots: &["sessions", "archived_sessions"],
         optional: false,
         is_log: parse::is_jsonl,
@@ -64,7 +60,6 @@ const SPECS: [Spec; Source::COUNT] = [
         label: "Claude",
         env: "CLAUDE_CONFIG_DIR",
         home: ".claude",
-        embedded: &[],
         roots: &["projects"],
         optional: false,
         is_log: parse::is_jsonl,
@@ -75,8 +70,6 @@ const SPECS: [Spec; Source::COUNT] = [
         label: "DSH",
         env: "DSH_HOME",
         home: ".dsh",
-        // Palmier Pro runs DSH with a private home.
-        embedded: &["Library/Application Support/Palmier DSH Lab/Runtime/backend/home"],
         roots: &["sessions"],
         optional: true,
         is_log: parse::dsh::is_log,
@@ -120,22 +113,12 @@ impl Source {
             .into_iter()
             .find(|s| s.id().eq_ignore_ascii_case(id))
     }
-    /// The home (from its environment variable or the default), then any
-    /// embedded homes that exist on this machine.
-    pub fn default_dirs(self) -> Vec<PathBuf> {
+    /// The home from its environment variable, or the default.
+    pub fn default_dir(self) -> PathBuf {
         let spec = self.spec();
-        let home = crate::args::home();
-        let main = std::env::var_os(spec.env)
+        std::env::var_os(spec.env)
             .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(spec.home));
-        std::iter::once(main)
-            .chain(
-                spec.embedded
-                    .iter()
-                    .map(|d| home.join(d))
-                    .filter(|d| d.is_dir()),
-            )
-            .collect()
+            .unwrap_or_else(|| crate::args::home().join(spec.home))
     }
     pub fn parse(self, path: &Path) -> Result<parse::Parsed> {
         (self.spec().parse)(path)

@@ -832,9 +832,8 @@ fn dsh_steps_cache_and_frames() {
 
 #[test]
 fn dsh_reads_every_home_without_double_counting() {
-    // Palmier Pro runs DSH with its own home. Both homes are indexed, and a
-    // session upgraded in place (session.jsonl + session.v4.jsonl, same
-    // messages) is counted once.
+    // Every --dsh-dir home is indexed, and a session upgraded in place
+    // (session.jsonl + session.v4.jsonl, same messages) is counted once.
     use ruzstd::encoding::{CompressionLevel, compress_to_vec};
     let session = |id: &str, outputs: &[u64]| {
         let mut lines = vec![json!({"type":"session","id":id}).to_string()];
@@ -861,9 +860,9 @@ fn dsh_reads_every_home_without_double_counting() {
     };
     write("dsh", "a", "session.jsonl.zstd", &[100, 200]);
     write("dsh", "a", "session.v4.jsonl.zstd", &[100, 200]);
-    write("palmier", "b", "session.v4.jsonl.zstd", &[40]);
+    write("other", "b", "session.v4.jsonl.zstd", &[40]);
     let mut args = Args::parse_from(["token-speed", "--provider", "dsh", "--all-time"]);
-    args.dsh_dir = vec![dir.path().join("dsh"), dir.path().join("palmier")];
+    args.dsh_dir = vec![dir.path().join("dsh"), dir.path().join("other")];
     args.cache = dir.path().join("index.sqlite3");
     let (rows, meta) = data::collect(&args, |_, _| {}).unwrap();
     assert_eq!(meta.parsed_files, 3);

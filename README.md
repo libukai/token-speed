@@ -211,7 +211,7 @@ Text tables have borders, right-aligned numeric columns and, for summaries, a to
 | --- | --- | --- |
 | Codex | `~/.codex/{sessions,archived_sessions}` | `CODEX_HOME` or `--codex-dir` |
 | Claude Code | `~/.claude/projects` | `CLAUDE_CONFIG_DIR` or `--claude-dir` |
-| DSH (DeepSeek Harness) | `~/.dsh/sessions` (`*.jsonl.zstd`), plus Palmier Pro's DSH home when present | `DSH_HOME` or `--dsh-dir` (repeatable) |
+| DSH (DeepSeek Harness) | `~/.dsh/sessions` (`*.jsonl.zstd`) | `DSH_HOME` or `--dsh-dir` (repeatable) |
 | SQLite index | `~/.cache/token-speed/index.sqlite3` | `XDG_CACHE_HOME` or `--cache` |
 
 The parser includes subagent logs and deduplicates supported usage records. The cache stores token counts, timestamps, model names, session identifiers and source paths. It does **not** store prompts or tool-output bodies. Reports can contain session identifiers and file paths; redact them before sharing.
