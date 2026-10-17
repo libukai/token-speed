@@ -16,7 +16,7 @@ use std::{
 };
 use walkdir::WalkDir;
 
-const CACHE_VERSION: i64 = 3;
+const CACHE_VERSION: i64 = 4;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Record {
     pub provider: Source,
@@ -65,7 +65,11 @@ pub fn collect(
     let roots = Source::ALL
         .into_iter()
         .filter(|s| args.provider.matches(*s))
-        .flat_map(|s| s.spec().roots.iter().map(move |r| (s, args.dir(s).join(r))));
+        .flat_map(|s| {
+            args.dirs(s)
+                .iter()
+                .flat_map(move |d| s.spec().roots.iter().map(move |r| (s, d.join(r))))
+        });
     let mut meta = Metadata::default();
     let mut result = HashMap::new();
     let mut paths = HashSet::new();

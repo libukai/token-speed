@@ -129,12 +129,16 @@ pub struct Args {
     pub max_gap: f64,
     #[arg(long, default_value_t = 5.0)]
     pub interval: f64,
-    #[arg(long, default_value_os_t = Source::Codex.default_dir(), help = "Codex home (CODEX_HOME)")]
-    pub codex_dir: PathBuf,
-    #[arg(long, default_value_os_t = Source::Claude.default_dir(), help = "Claude Code home (CLAUDE_CONFIG_DIR)")]
-    pub claude_dir: PathBuf,
-    #[arg(long, default_value_os_t = Source::Dsh.default_dir(), help = "DSH home (DSH_HOME)")]
-    pub dsh_dir: PathBuf,
+    #[arg(long, default_values_os_t = Source::Codex.default_dirs(), help = "Codex home (CODEX_HOME); repeatable")]
+    pub codex_dir: Vec<PathBuf>,
+    #[arg(long, default_values_os_t = Source::Claude.default_dirs(), help = "Claude Code home (CLAUDE_CONFIG_DIR); repeatable")]
+    pub claude_dir: Vec<PathBuf>,
+    #[arg(
+        long,
+        default_values_os_t = Source::Dsh.default_dirs(),
+        help = "DSH home (DSH_HOME), plus Palmier Pro's when present; repeatable"
+    )]
+    pub dsh_dir: Vec<PathBuf>,
     #[arg(long, default_value_os_t=cache_path())]
     pub cache: PathBuf,
     #[arg(long)]
@@ -149,8 +153,8 @@ impl Args {
         }
     }
 
-    /// Home directory of a source.
-    pub fn dir(&self, source: Source) -> &PathBuf {
+    /// Home directories of a source.
+    pub fn dirs(&self, source: Source) -> &[PathBuf] {
         match source {
             Source::Codex => &self.codex_dir,
             Source::Claude => &self.claude_dir,

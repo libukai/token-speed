@@ -26,6 +26,7 @@ fn record(session: &str, id: &str, model: &str, end: f64, start: Option<f64>, u:
 
 pub fn parse(path: &Path) -> Result<Parsed> {
     let mut session = file_stem(path);
+    let mut seen_meta = false;
     let mut model = "unknown".to_owned();
     let mut anchor = None;
     let mut cumulative: Option<Value> = None;
@@ -35,7 +36,10 @@ pub fn parse(path: &Path) -> Result<Parsed> {
         let p = &d["payload"];
         let sub = text(&p["type"]).unwrap_or("");
         match text(&d["type"]).unwrap_or("") {
-            "session_meta" => {
+            // A forked thread's log starts with its own meta, then repeats
+            // its parent's; the file belongs to the first.
+            "session_meta" if !seen_meta => {
+                seen_meta = true;
                 session = text(&p["id"])
                     .or_else(|| text(&p["session_id"]))
                     .unwrap_or(&session)

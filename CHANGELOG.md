@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fix: Codex forked threads (subagents) were attributed to their parent, so their own usage was dropped and legacy counters were reported instead. The cache is rebuilt once.
+- DSH sessions run inside Palmier Pro are indexed alongside `~/.dsh`; source directory flags are repeatable.
 - Dark / light themes: `--theme`, `TOKEN_SPEED_THEME`, `T`, or the `◐` toggle.
 - Mouse: source, time-window and theme chips, table rows and chart buckets are clickable; clicks also close dialogs and keep a typed filter.
 - Fix: clicks lagged or missed after pointer movement. Only press / release / wheel reporting is enabled, and events that change nothing no longer trigger a redraw each.

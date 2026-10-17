@@ -233,6 +233,49 @@ fn codex_mirrors_and_tools() {
     );
 }
 #[test]
+fn codex_fork_keeps_its_own_usage() {
+    // A forked thread's log starts with its own meta, then repeats the
+    // parent's. Its usage belongs to the fork, and the legacy counters that
+    // mirror it must not be reported instead.
+    let count = |t, total: u64, last: u64| {
+        codex(
+            t,
+            "event_msg",
+            json!({"type":"token_count","info":{"total_token_usage":{"output_tokens":total},"last_token_usage":{"output_tokens":last}}}),
+        )
+    };
+    let rows = fixture(
+        vec![
+            codex(
+                0,
+                "session_meta",
+                json!({"id":"fork","forked_from_id":"parent"}),
+            ),
+            codex(0, "session_meta", json!({"id":"parent"})),
+            codex(0, "event_msg", json!({"type":"task_started"})),
+            codex(
+                10,
+                "token_usage_record",
+                json!({"thread_id":"fork","response_id":"r1","usage":{"output_tokens":100}}),
+            ),
+            count(10, 100, 100),
+            codex(
+                20,
+                "token_usage_record",
+                json!({"thread_id":"fork","response_id":"r2","usage":{"output_tokens":50}}),
+            ),
+            count(20, 150, 50),
+        ],
+        "codex",
+    );
+    assert_eq!(
+        rows.iter()
+            .map(|r| (r.session.as_str(), r.id.as_str(), r.output_tokens))
+            .collect::<Vec<_>>(),
+        vec![("fork", "r1", 100), ("fork", "r2", 50)]
+    );
+}
+#[test]
 fn legacy_duplicate_and_reset() {
     let usage = |t, total, last| {
         codex(
@@ -330,7 +373,7 @@ fn cache_append_dedup_and_deleted_files() {
     )
     .unwrap();
     let mut args = Args::parse_from(["token-speed", "--provider", "codex"]);
-    args.codex_dir = dir.path().into();
+    args.codex_dir = vec![dir.path().into()];
     args.cache = dir.path().join("index.sqlite3");
     let (rows, meta) = data::collect(&args, |_, _| {}).unwrap();
     assert_eq!(meta.parsed_files, 1);
@@ -645,7 +688,7 @@ fn concurrent_cache_refreshes_do_not_deadlock() {
         .unwrap();
     }
     let mut args = Args::parse_from(["token-speed", "--provider", "codex"]);
-    args.codex_dir = dir.path().into();
+    args.codex_dir = vec![dir.path().into()];
     args.cache = dir.path().join("index.sqlite3");
     data::collect(&args, |_, _| {}).unwrap();
     args.refresh = true;
@@ -779,12 +822,58 @@ fn dsh_steps_cache_and_frames() {
     assert_eq!(s.tokens_per_second, Some(50.0));
 
     let mut args = Args::parse_from(["token-speed", "--provider", "dsh", "--all-time"]);
-    args.dsh_dir = dir.path().into();
+    args.dsh_dir = vec![dir.path().into()];
     args.cache = dir.path().join("index.sqlite3");
     let (rows, meta) = data::collect(&args, |_, _| {}).unwrap();
     assert_eq!(rows.len(), 3);
     assert_eq!(meta.parsed_files, 1);
     assert!(rows.iter().all(|r| r.provider == Source::Dsh));
+}
+
+#[test]
+fn dsh_reads_every_home_without_double_counting() {
+    // Palmier Pro runs DSH with its own home. Both homes are indexed, and a
+    // session upgraded in place (session.jsonl + session.v4.jsonl, same
+    // messages) is counted once.
+    use ruzstd::encoding::{CompressionLevel, compress_to_vec};
+    let session = |id: &str, outputs: &[u64]| {
+        let mut lines = vec![json!({"type":"session","id":id}).to_string()];
+        for (i, &o) in outputs.iter().enumerate() {
+            let step = i as u64 + 1;
+            lines.push(dsh(step * 10, "step/start", json!({"turn":1,"step":step})));
+            lines.push(dsh_message(
+                step * 10 + 2,
+                step,
+                &format!("{id}-m{step}"),
+                o,
+            ));
+        }
+        compress_to_vec(
+            (lines.join("\n") + "\n").as_bytes(),
+            CompressionLevel::Fastest,
+        )
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let write = |home: &str, id: &str, file: &str, outputs: &[u64]| {
+        let d = dir.path().join(home).join("sessions/--project--").join(id);
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join(file), session(id, outputs)).unwrap();
+    };
+    write("dsh", "a", "session.jsonl.zstd", &[100, 200]);
+    write("dsh", "a", "session.v4.jsonl.zstd", &[100, 200]);
+    write("palmier", "b", "session.v4.jsonl.zstd", &[40]);
+    let mut args = Args::parse_from(["token-speed", "--provider", "dsh", "--all-time"]);
+    args.dsh_dir = vec![dir.path().join("dsh"), dir.path().join("palmier")];
+    args.cache = dir.path().join("index.sqlite3");
+    let (rows, meta) = data::collect(&args, |_, _| {}).unwrap();
+    assert_eq!(meta.parsed_files, 3);
+    let mut seen: Vec<_> = rows
+        .iter()
+        .map(|r| (r.session.as_str(), r.output_tokens))
+        .collect();
+    seen.sort();
+    assert_eq!(seen, [("a", 100), ("a", 200), ("b", 40)]);
+    assert_eq!(data::summarize(&rows, 300.0).output_tokens, 340);
 }
 
 #[test]
@@ -1077,7 +1166,10 @@ fn source_registry_is_consistent() {
     assert_eq!(values, ["all", "codex", "claude", "dsh"]);
     // Each source has its own directory flag and accent color.
     let args = Args::parse_from(["token-speed"]);
-    let dirs: HashSet<_> = Source::ALL.iter().map(|&s| args.dir(s).clone()).collect();
+    let dirs: HashSet<_> = Source::ALL
+        .iter()
+        .map(|&s| args.dirs(s)[0].clone())
+        .collect();
     assert_eq!(dirs.len(), Source::COUNT);
     for theme in [args::Theme::Dark, args::Theme::Light] {
         let pal = ui::Palette::of(theme);
