@@ -865,7 +865,17 @@ fn theme_toggles_by_key_flag_and_click() {
             ui::base_colors(args::Theme::Light).0
         )
     );
+    assert!(
+        draw_at(&mut app, 120, 40)
+            .iter()
+            .any(|l| l.contains("Light · v"))
+    );
     click_label(&mut app, 120, 40, "◐ Light");
+    assert!(
+        draw_at(&mut app, 120, 40)
+            .iter()
+            .any(|l| l.contains("Dark · v"))
+    );
     assert_eq!(app.args.theme, args::Theme::Dark);
     let args = Args::parse_from(["token-speed", "--theme", "light"]);
     assert_eq!(args.theme, args::Theme::Light);

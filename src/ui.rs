@@ -317,7 +317,11 @@ fn header(f: &mut Frame, area: Rect, app: &App) {
                     bold(if app.paused { pal().gold } else { pal().mint }),
                 ),
                 Span::styled(
-                    format!("  Light · v{}", env!("CARGO_PKG_VERSION")),
+                    format!(
+                        "  {} · v{}",
+                        app.args.theme.label(),
+                        env!("CARGO_PKG_VERSION")
+                    ),
                     style(pal().muted),
                 ),
             ]),
