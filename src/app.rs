@@ -1,6 +1,7 @@
 use crate::{
-    args::{Args, Group, Provider, Screen},
+    args::{Args, Group, Screen},
     data::{self, Clock, Metadata, Record, Summary},
+    source::{Filter, Source},
 };
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -15,18 +16,23 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub const SOURCES: usize = Provider::SOURCES.len();
+pub const SOURCES: usize = Source::COUNT;
 
 /// Something on screen that reacts to a left click.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Click {
     Screen(Screen),
-    Source(Provider),
+    Filter(Filter),
     Range(Range),
     CycleRange,
     Theme,
     Row(usize),
     Bucket(usize),
+}
+
+/// Source filter for a digit key: 1 is all, then one per source.
+fn digit_filter(c: char) -> Option<Filter> {
+    Filter::from_digit(c.to_digit(10)?)
 }
 
 pub enum Load {
@@ -56,7 +62,7 @@ pub struct View {
     pub rows: Vec<Record>,
     pub models: Vec<Summary>,
     pub totals: Summary,
-    /// Per-source summaries, indexed like `Provider::SOURCES`.
+    /// Per-source values below are indexed by `Source::index`.
     pub sources: [Summary; SOURCES],
     pub bins: Vec<[Option<f64>; SOURCES]>,
     pub activity: Vec<[u64; SOURCES]>,
@@ -161,7 +167,7 @@ impl App {
         self.error = None;
         self.progress = (0, 0);
         let mut args = self.args.clone();
-        args.provider = Provider::All;
+        args.provider = Filter::ALL;
         let tx = self.tx.clone();
         thread::spawn(move || {
             let progress_tx = tx.clone();
@@ -221,12 +227,8 @@ impl App {
             });
         }
         let totals = data::summarize(&rows, self.args.max_gap);
-        let sources = Provider::SOURCES.map(|p| {
-            data::summarize(
-                rows.iter().filter(|r| p.matches(&r.provider)),
-                self.args.max_gap,
-            )
-        });
+        let sources = Source::ALL
+            .map(|s| data::summarize(rows.iter().filter(|r| r.provider == s), self.args.max_gap));
         let mut models = data::aggregate(&rows, Group::Model, self.clock, self.args.max_gap);
         models.sort_by(|a, b| b.output_tokens.cmp(&a.output_tokens));
         let (since, until) = data::bounds(&self.args, self.clock)?;
@@ -251,7 +253,7 @@ impl App {
         let mut timed = vec![[0usize; SOURCES]; count];
         for r in &rows {
             let bin = (((r.timestamp - start) / step).floor().max(0.0) as usize).min(count - 1);
-            let p = Provider::slot(&r.provider);
+            let p = r.provider.index();
             activity[bin][p] += r.output_tokens;
             requests[bin][p] += 1;
             if let Some(d) = r.duration(self.args.max_gap) {
@@ -269,7 +271,7 @@ impl App {
             .collect();
         let mut indexed = [false; SOURCES];
         for r in &self.records {
-            indexed[Provider::slot(&r.provider)] = true;
+            indexed[r.provider.index()] = true;
         }
         self.view = View {
             rows,
@@ -293,13 +295,27 @@ impl App {
         });
         Ok(())
     }
-    /// Source slots to display. Codex and Claude are always shown; DSH appears
-    /// once its logs are indexed or when it is selected explicitly.
-    pub fn visible_sources(&self) -> Vec<usize> {
-        let dsh = Provider::slot("dsh");
-        (0..SOURCES)
-            .filter(|&p| p != dsh || self.args.provider == Provider::Dsh || self.view.indexed[dsh])
+    /// Sources to display. Optional sources appear once their logs are
+    /// indexed or when selected explicitly.
+    pub fn visible_sources(&self) -> Vec<Source> {
+        Source::ALL
+            .into_iter()
+            .filter(|&s| {
+                !s.spec().optional
+                    || self.args.provider == Filter::only(s)
+                    || self.view.indexed[s.index()]
+            })
             .collect()
+    }
+    /// Sources shown in the timeline: the selected one, or all visible.
+    pub fn shown_sources(&self) -> Vec<Source> {
+        match self.args.provider.0 {
+            Some(s) => vec![s],
+            None => self.visible_sources(),
+        }
+    }
+    pub fn palette(&self) -> crate::ui::Palette {
+        crate::ui::Palette::of(self.args.theme)
     }
     pub fn row_count(&self) -> usize {
         if self.screen == Screen::Requests {
@@ -333,8 +349,8 @@ impl App {
         };
         match target {
             Click::Screen(screen) => self.set_screen(screen),
-            Click::Source(provider) => {
-                self.args.provider = provider;
+            Click::Filter(filter) => {
+                self.args.provider = filter;
                 self.table.select(Some(0));
                 self.rebuild()?;
             }
@@ -397,10 +413,11 @@ impl App {
         }
         match key.code {
             KeyCode::Char('q') => return Ok(true),
-            KeyCode::Char('1') => self.args.provider = Provider::All,
-            KeyCode::Char('2') => self.args.provider = Provider::Codex,
-            KeyCode::Char('3') => self.args.provider = Provider::Claude,
-            KeyCode::Char('4') => self.args.provider = Provider::Dsh,
+            KeyCode::Char(c) if digit_filter(c).is_some() => {
+                self.args.provider = digit_filter(c).unwrap();
+                self.table.select(Some(0));
+                self.rebuild()?;
+            }
             KeyCode::Char('d') => self.cycle_range()?,
             KeyCode::Char('T') => self.args.theme = self.args.theme.toggled(),
             KeyCode::Char('t') => {
@@ -461,7 +478,7 @@ impl App {
             }
             _ => {}
         }
-        if matches!(key.code, KeyCode::Char('1'..='4') | KeyCode::Esc) {
+        if key.code == KeyCode::Esc {
             self.table.select(Some(0));
             self.rebuild()?;
         }

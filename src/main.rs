@@ -1,7 +1,9 @@
 mod app;
 mod args;
 mod data;
+mod parse;
 mod report;
+mod source;
 #[cfg(test)]
 mod tests;
 mod ui;

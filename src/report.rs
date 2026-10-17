@@ -1,6 +1,7 @@
 use crate::{
     args::{Args, Command, Format},
     data::{self, Clock, Record},
+    source::Source,
     ui,
 };
 use anyhow::Result;
@@ -124,7 +125,7 @@ pub(crate) fn write_report(
                         .map(|r| {
                             vec![
                                 clock.format(r.timestamp, "%Y-%m-%d %H:%M:%S"),
-                                r.provider.clone(),
+                                r.provider.id().into(),
                                 r.model.clone(),
                                 ui::grouped(r.output_tokens),
                                 ui::rate(r.duration(args.max_gap)),
@@ -188,7 +189,7 @@ pub(crate) fn write_report(
 fn summary_cells(s: &data::Summary) -> Vec<String> {
     vec![
         s.period.clone(),
-        s.provider.clone(),
+        s.provider.map_or("", Source::id).into(),
         s.model.clone(),
         ui::grouped(s.requests),
         format!(

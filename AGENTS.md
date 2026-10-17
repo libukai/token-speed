@@ -2,8 +2,10 @@
 
 Rust CLI / Ratatui TUI for local Codex and Claude Code usage logs. Keep the runtime local and the measurement claims accurate. See `docs/metrics.md` before changing parsing or aggregation.
 
-- `src/args.rs`: CLI; `src/data.rs`: parsing, metrics, SQLite cache.
-- `src/app.rs`: state, input handling, background indexing; `src/ui.rs`: rendering.
+- `src/source.rs`: source registry (ids, homes, log roots, parser); add sources there first.
+- `src/parse/`: one parser per source; `src/data.rs`: indexing, SQLite cache, metrics.
+- `src/args.rs`: CLI; `src/report.rs`: table / JSON / CSV reports.
+- `src/app.rs`: state, input handling, background indexing; `src/ui/`: rendering, one module per view, themes in `ui/theme.rs`.
 - `src/tests.rs`: synthetic parser fixtures, interaction and layout checks.
 - Run Cargo commands from the repo root. Rust 1.92+; SQLite is bundled. Apple targets use `/usr/bin/clang` via `.cargo/config.toml`.
 - Validate meaningful changes with `cargo test --locked`, `cargo clippy --locked --all-targets -- -D warnings`, and `cargo fmt --check`.

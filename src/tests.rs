@@ -5,8 +5,9 @@ use data::Record;
 use ratatui::{Terminal, backend::TestBackend, style::Color};
 use serde_json::Value;
 use serde_json::json;
+use source::{Filter, Source};
 use std::time::Instant;
-use std::{fs, io::Write};
+use std::{collections::HashSet, fs, io::Write};
 
 #[test]
 fn report_flags_choose_output_without_opening_tui() {
@@ -49,7 +50,7 @@ fn report_fixture() -> Vec<Record> {
     .into_iter()
     .enumerate()
     .map(|(i, (model, output_tokens, seconds))| Record {
-        provider: "codex".into(),
+        provider: Source::Codex,
         session: "synthetic-session".into(),
         id: format!("r{i}"),
         model: model.into(),
@@ -186,7 +187,7 @@ fn fixture(records: Vec<Value>, provider: &str) -> Vec<Record> {
             .join("\n"),
     )
     .unwrap();
-    data::parse_file(&path, provider).unwrap().0
+    Source::from_id(provider).unwrap().parse(&path).unwrap().0
 }
 fn codex(t: u32, typ: &str, p: Value) -> Value {
     json!({"timestamp":format!("2026-10-08T00:00:{t:02}Z"),"type":typ,"payload":p})
@@ -372,15 +373,15 @@ fn dates_timezone_and_partial_lines() {
         clock.format(start.unwrap(), "%Y-%m-%d %H:%M"),
         "2026-10-08 00:00"
     );
-    assert!(data::stamp(&json!("bad")).is_none());
+    assert!(parse::stamp(&json!("bad")).is_none());
     assert_eq!(
-        data::stamp(&json!(1791417600000i64)),
-        data::stamp(&json!("2026-10-08T00:00:00Z"))
+        parse::stamp(&json!(1791417600000i64)),
+        parse::stamp(&json!("2026-10-08T00:00:00Z"))
     );
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("test.jsonl");
     fs::write(&p, "[]\n{broken\n").unwrap();
-    let (rows, bad) = data::parse_file(&p, "codex").unwrap();
+    let (rows, bad) = Source::from_id("codex").unwrap().parse(&p).unwrap();
     assert!(rows.is_empty());
     assert_eq!(bad, 2);
 }
@@ -414,7 +415,7 @@ fn demo_app() -> app::App {
                 };
                 let end = base + hour as f64 * 3600.0 + request as f64 * 180.0 + 50.0;
                 app.records.push(Record {
-                    provider: provider.into(),
+                    provider: Source::from_id(provider).unwrap(),
                     session: format!("demo-{provider}"),
                     id: format!("r-{hour}-{request}"),
                     model: if provider == "codex" {
@@ -452,7 +453,7 @@ fn tui_filters_pause_navigation_and_chart_gaps() {
     assert!(app.view.bins[9][0].is_none());
     assert!(app.view.bins[9][1].is_some());
     press(&mut app, KeyCode::Char('2'));
-    assert!(app.view.rows.iter().all(|r| r.provider == "codex"));
+    assert!(app.view.rows.iter().all(|r| r.provider == Source::Codex));
     assert_eq!(app.view.sources[1].requests, 0);
     press(&mut app, KeyCode::Char(' '));
     assert!(app.paused);
@@ -667,7 +668,7 @@ fn four_views_preserve_filters_and_distinguish_missing_timing() {
     missing.timestamp = app.view.chart_start + 9.0 * 3600.0 + 10.0;
     missing.start = None;
     missing.id = "missing-timing".into();
-    missing.provider = "codex".into();
+    missing.provider = Source::Codex;
     app.records.push(missing);
     app.records
         .sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
@@ -762,7 +763,7 @@ fn dsh_steps_cache_and_frames() {
     fs::write(&path, &bytes).unwrap();
     fs::write(session.join("session.lock"), "").unwrap();
 
-    let (rows, bad) = data::parse_file(&path, "dsh").unwrap();
+    let (rows, bad) = Source::from_id("dsh").unwrap().parse(&path).unwrap();
     assert_eq!(bad, 1);
     assert_eq!(rows.len(), 3);
     assert!(rows.iter().all(|r| r.session == "session-synthetic"));
@@ -783,23 +784,23 @@ fn dsh_steps_cache_and_frames() {
     let (rows, meta) = data::collect(&args, |_, _| {}).unwrap();
     assert_eq!(rows.len(), 3);
     assert_eq!(meta.parsed_files, 1);
-    assert!(rows.iter().all(|r| r.provider == "dsh"));
+    assert!(rows.iter().all(|r| r.provider == Source::Dsh));
 }
 
 #[test]
 fn dsh_source_appears_once_indexed() {
     let mut app = demo_app();
-    assert_eq!(app.visible_sources(), vec![0, 1]);
+    assert_eq!(app.visible_sources(), [Source::Codex, Source::Claude]);
     let mut extra = app.records[0].clone();
-    extra.provider = "dsh".into();
+    extra.provider = Source::Dsh;
     extra.id = "dsh-1".into();
     extra.model = "deepseek-test".into();
     app.records.push(extra);
     app.rebuild().unwrap();
-    assert_eq!(app.visible_sources(), vec![0, 1, 2]);
+    assert_eq!(app.visible_sources(), Source::ALL);
     assert_eq!(app.view.sources[2].requests, 1);
     press(&mut app, KeyCode::Char('4'));
-    assert!(app.view.rows.iter().all(|r| r.provider == "dsh"));
+    assert!(app.view.rows.iter().all(|r| r.provider == Source::Dsh));
     for screen in args::Screen::ALL {
         app.set_screen(screen);
         for (width, height) in [(140, 46), (80, 24), (40, 12)] {
@@ -888,10 +889,10 @@ fn clicks_hit_rendered_controls_at_every_width() {
     for (width, height) in [(140, 46), (120, 40), (100, 30), (80, 24), (60, 20)] {
         let mut app = demo_app();
         click_label(&mut app, width, height, "3 Claude");
-        assert_eq!(app.args.provider, args::Provider::Claude, "{width}");
-        assert!(app.view.rows.iter().all(|r| r.provider == "claude"));
+        assert_eq!(app.args.provider, Filter::only(Source::Claude), "{width}");
+        assert!(app.view.rows.iter().all(|r| r.provider == Source::Claude));
         click_label(&mut app, width, height, "1 All");
-        assert_eq!(app.args.provider, args::Provider::All, "{width}");
+        assert_eq!(app.args.provider, Filter::ALL, "{width}");
         click_label(&mut app, width, height, "F3 Models");
         assert_eq!(app.screen, args::Screen::Models, "{width}");
         // Short tab labels below 80 columns inside the margin.
@@ -978,6 +979,32 @@ fn clicks_select_rows_buckets_and_close_dialogs() {
     app.click(last as u16, y as u16).unwrap();
     assert_eq!(app.cursor, app.view.bins.len() - 1);
 
+    // Clicks on the plot pick the bucket under the pointer, right of the
+    // y axis labels; the first and last columns are the ends of the range.
+    let lines = draw_at(&mut app, 140, 46);
+    let (y, corner) = lines
+        .iter()
+        .enumerate()
+        .find_map(|(y, l)| l.chars().position(|c| c == '└').map(|x| (y, x)))
+        .unwrap();
+    // The axis line ends at the plot's last column.
+    let right = lines[y]
+        .chars()
+        .collect::<Vec<_>>()
+        .iter()
+        .rposition(|&c| c == '─')
+        .unwrap();
+    app.click(corner as u16 + 1, y as u16 - 1).unwrap();
+    assert_eq!(app.cursor, 0);
+    app.click(right as u16, y as u16 - 1).unwrap();
+    assert_eq!(app.cursor, app.view.bins.len() - 1);
+    app.click(corner as u16 - 1, y as u16 - 1).unwrap();
+    assert_eq!(
+        app.cursor,
+        app.view.bins.len() - 1,
+        "y labels are not buckets"
+    );
+
     // A click while typing a filter keeps it and still acts.
     press(&mut app, KeyCode::Char('/'));
     press(&mut app, KeyCode::Char('g'));
@@ -1015,4 +1042,69 @@ fn idle_mouse_events_are_ignored_but_clicks_redraw() {
             .unwrap(),
         app::Handled::Changed
     ));
+}
+
+#[test]
+fn source_registry_is_consistent() {
+    use clap::ValueEnum;
+    // Indices, ids and CLI values line up, and every source round-trips.
+    for (i, s) in Source::ALL.into_iter().enumerate() {
+        assert_eq!(s.index(), i);
+        assert_eq!(Source::from_id(s.id()), Some(s));
+        assert_eq!(Source::from_id(&s.id().to_uppercase()), Some(s));
+        assert_eq!(serde_json::to_value(s).unwrap(), json!(s.id()));
+        assert!(!s.spec().roots.is_empty());
+        let args = Args::parse_from(["token-speed", "--provider", s.id()]);
+        assert_eq!(args.provider, Filter::only(s));
+        assert_eq!(
+            Filter::from_digit(Filter::only(s).digit()),
+            Some(Filter::only(s))
+        );
+    }
+    assert_eq!(Source::from_id("unknown"), None, "no silent fallback");
+    assert_eq!(
+        format!("[{:<6}]", Source::Dsh),
+        "[dsh   ]",
+        "Display pads columns"
+    );
+    assert_eq!(Filter::from_digit(1), Some(Filter::ALL));
+    assert_eq!(Filter::from_digit(0), None);
+    assert_eq!(Filter::from_digit(Source::COUNT as u32 + 2), None);
+    let values: Vec<_> = Filter::value_variants()
+        .iter()
+        .map(|f| f.to_possible_value().unwrap().get_name().to_owned())
+        .collect();
+    assert_eq!(values, ["all", "codex", "claude", "dsh"]);
+    // Each source has its own directory flag and accent color.
+    let args = Args::parse_from(["token-speed"]);
+    let dirs: HashSet<_> = Source::ALL.iter().map(|&s| args.dir(s).clone()).collect();
+    assert_eq!(dirs.len(), Source::COUNT);
+    for theme in [args::Theme::Dark, args::Theme::Light] {
+        let pal = ui::Palette::of(theme);
+        let colors: HashSet<_> = Source::ALL
+            .iter()
+            .map(|&s| format!("{:?}", pal.accent(s)))
+            .collect();
+        assert_eq!(colors.len(), Source::COUNT);
+    }
+}
+
+#[test]
+fn digit_keys_follow_the_registry() {
+    let mut app = demo_app();
+    for s in Source::ALL {
+        let key = char::from_digit(Filter::only(s).digit(), 10).unwrap();
+        press(&mut app, KeyCode::Char(key));
+        assert_eq!(app.args.provider, Filter::only(s));
+        assert!(app.view.rows.iter().all(|r| r.provider == s));
+    }
+    press(&mut app, KeyCode::Char('1'));
+    assert_eq!(app.args.provider, Filter::ALL);
+    let key = char::from_digit(Source::COUNT as u32 + 2, 10).unwrap();
+    press(&mut app, KeyCode::Char(key));
+    assert_eq!(
+        app.args.provider,
+        Filter::ALL,
+        "an unused digit does nothing"
+    );
 }
