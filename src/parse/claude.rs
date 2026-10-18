@@ -36,7 +36,7 @@ fn record(session: &str, id: &str, model: &str, end: f64, u: &Value) -> Record {
         output_tokens: n(u, "output_tokens"),
         reasoning_tokens: n(&u["output_tokens_details"], "thinking_tokens"),
         timing_source: "parent-boundary".into(),
-        speed_mode: None,
+        speed_mode: text(&u["speed"]).map(Into::into),
     }
 }
 

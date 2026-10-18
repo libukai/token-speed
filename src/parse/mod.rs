@@ -70,6 +70,9 @@ fn merge_max(prev: &mut Record, r: &Record) {
     prev.cached_tokens = prev.cached_tokens.max(r.cached_tokens);
     prev.cache_write_tokens = prev.cache_write_tokens.max(r.cache_write_tokens);
     prev.reasoning_tokens = prev.reasoning_tokens.max(r.reasoning_tokens);
+    if r.speed_mode.is_some() {
+        prev.speed_mode.clone_from(&r.speed_mode);
+    }
 }
 
 /// One record per key, the last one winning, sorted by completion time.

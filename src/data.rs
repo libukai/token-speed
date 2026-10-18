@@ -16,7 +16,7 @@ use std::{
 };
 use walkdir::WalkDir;
 
-const CACHE_VERSION: i64 = 5;
+const CACHE_VERSION: i64 = 6;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Record {
     pub provider: Source,

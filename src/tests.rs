@@ -358,6 +358,30 @@ fn claude_blocks_branch_and_cache() {
     );
 }
 #[test]
+fn claude_speed_mode_comes_from_usage() {
+    let assistant = |id: &str, t, speed: Option<&str>| {
+        let mut usage = json!({"output_tokens":10});
+        if let Some(s) = speed {
+            usage["speed"] = json!(s);
+        }
+        json!({"type":"assistant","uuid":id,"sessionId":"s","timestamp":format!("2026-10-08T00:00:{t:02}Z"),"message":{"id":id,"model":"claude-test","usage":usage}})
+    };
+    let rows = fixture(
+        vec![
+            assistant("a", 1, Some("fast")),
+            assistant("b", 2, Some("standard")),
+            assistant("c", 3, None),
+        ],
+        "claude",
+    );
+    assert_eq!(
+        rows.iter()
+            .map(|r| r.speed_mode.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some("fast"), Some("standard"), None]
+    );
+}
+#[test]
 fn weighted_speed_and_exclusions() {
     let rows = fixture(
         vec![
