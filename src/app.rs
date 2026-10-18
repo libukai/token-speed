@@ -97,6 +97,8 @@ pub struct App {
     pub records: Vec<Record>,
     pub view: View,
     pub meta: Metadata,
+    /// Sources whose log directories exist, known before indexing finishes.
+    present: [bool; SOURCES],
     pub loading: bool,
     pub paused: bool,
     pub progress: (usize, usize),
@@ -133,6 +135,11 @@ impl App {
         };
         let screen = args.view;
         let (tx, rx) = mpsc::channel();
+        let present = Source::ALL.map(|s| {
+            args.dirs(s)
+                .iter()
+                .any(|d| s.spec().roots.iter().any(|r| d.join(r).exists()))
+        });
         Self {
             args,
             clock,
@@ -140,6 +147,7 @@ impl App {
             records: Vec::new(),
             view: View::default(),
             meta: Metadata::default(),
+            present,
             loading: false,
             paused: false,
             progress: (0, 0),
@@ -297,14 +305,15 @@ impl App {
         });
         Ok(())
     }
-    /// Sources to display. Optional sources appear once their logs are
-    /// indexed or when selected explicitly.
+    /// Sources to display. Optional sources appear when their log directory
+    /// exists, once their logs are indexed, or when selected explicitly.
     pub fn visible_sources(&self) -> Vec<Source> {
         Source::ALL
             .into_iter()
             .filter(|&s| {
                 !s.spec().optional
                     || self.args.provider == Filter::only(s)
+                    || self.present[s.index()]
                     || self.view.indexed[s.index()]
             })
             .collect()

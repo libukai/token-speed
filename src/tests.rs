@@ -498,6 +498,10 @@ fn demo_app() -> app::App {
         "UTC",
     ]);
     args.interval = 600.0;
+    // Synthetic: never depend on the machine's real log directories.
+    args.codex_dir = vec!["/nonexistent/codex".into()];
+    args.claude_dir = vec!["/nonexistent/claude".into()];
+    args.dsh_dir = vec!["/nonexistent/dsh".into()];
     let clock = Clock::new(Some("UTC")).unwrap();
     let mut app = app::App::new(args, clock);
     let base = Utc
@@ -935,6 +939,16 @@ fn dsh_reads_every_home_without_double_counting() {
     assert_eq!(data::summarize(&rows, 300.0).output_tokens, 340);
 }
 
+#[test]
+fn optional_source_is_visible_when_its_directory_exists() {
+    let dir = std::env::temp_dir().join(format!("token-speed-present-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("sessions")).unwrap();
+    let mut args = Args::parse_from(["token-speed"]);
+    args.dsh_dir = vec![dir.clone()];
+    let app = app::App::new(args, Clock::new(Some("UTC")).unwrap());
+    assert_eq!(app.visible_sources(), Source::ALL);
+    std::fs::remove_dir_all(dir).unwrap();
+}
 #[test]
 fn dsh_source_appears_once_indexed() {
     let mut app = demo_app();
