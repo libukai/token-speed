@@ -4,7 +4,7 @@ This repository includes `AGENTS.md` with project-specific **Code Review Rules**
 
 ## Repository settings
 
-Upstream (`william1010121/token-speed`) is configured as follows; this fork has not set up automatic review yet:
+Automatic Codex review is not enabled for this repository yet. When enabling it, the suggested settings are:
 
 | Setting | Value |
 | --- | --- |
@@ -14,7 +14,7 @@ Upstream (`william1010121/token-speed`) is configured as follows; this fork has 
 | Threat model | `docs/threat-model.md` |
 | Security reporting threshold | High for automatic reviews; Medium for manual reviews |
 
-These settings are stored in the connected Codex account, while the rules and threat model are versioned here. Reconfigure them separately if you fork the repository.
+These settings are stored in the connected Codex account, while the rules and threat model are versioned here.
 
 ## GitHub integration
 

@@ -12,7 +12,7 @@ Four views. Local logs. One native Rust binary.<br>
 [![Rust](https://img.shields.io/badge/Rust-1.92%2B-dea584?logo=rust)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-74b9ff)](LICENSE)
 
-[Quick start](#quick-start) · [Views](#four-ways-to-read-your-work) · [CLI](#scriptable-by-design) · [Metrics](docs/metrics.md) · [繁體中文](README.zh-TW.md)
+[Quick start](#quick-start) · [Views](#four-ways-to-read-your-work) · [CLI](#scriptable-by-design) · [Metrics](docs/metrics.md) · [简体中文](README.zh-CN.md)
 
 <img src="docs/preview.png" alt="token-speed Overview: provider throughput cards, activity map, recent requests and model comparison" width="1100">
 
@@ -35,8 +35,6 @@ You already have usage logs. See when your agents were active, which models were
 
 ## Quick start
 
-This fork is not published to npm or crates.io, and it has no prebuilt release yet: the `token-speed` package on npm is the [upstream](https://github.com/william1010121/token-speed) project, without the DSH and Magpie sources. Build this fork from source:
-
 ```bash
 cargo install --git https://github.com/libukai/token-speed --locked
 token-speed --today
@@ -44,7 +42,7 @@ token-speed --today
 
 Requires **Rust 1.92+** and a C compiler. SQLite is bundled. Cargo installs to `~/.cargo/bin` by default; ensure it is on your `PATH`. On macOS, if a custom compiler wrapper causes SDK/linker errors, set `CC=/usr/bin/clang` and `CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=/usr/bin/clang` (Intel: `CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER`).
 
-If you only need Codex and Claude Code, the upstream npm package and prebuilt binaries work: `npm install -g token-speed`.
+Prebuilt binaries and the npm package `@libukai/token-speed` are attached to [releases](https://github.com/libukai/token-speed/releases) once published. The unscoped `token-speed` on npm is the [upstream](https://github.com/william1010121/token-speed) project, without the DSH and Magpie sources.
 
 ### Build from source
 
@@ -108,7 +106,7 @@ token-speed --provider claude --model opus --view requests
 
 | Key | Action |
 | --- | --- |
-| `Tab` / `Shift-Tab`, `F1`–`F4` | Switch views |
+| `Tab` / `v`, `Shift-Tab`, `F1`–`F4` | Next / previous view, or jump to one |
 | Mouse | Click tabs, sources, time windows, table rows (again for details), chart buckets and `◐` theme; wheel scrolls |
 | `1` / `2` / `3` / `4` | All / Codex / Claude / DSH (shown once DSH logs exist) |
 | `t` / `w` / `m` / `a`, `d` | Today / 7 days / 30 days / all; cycle range |
@@ -120,7 +118,7 @@ token-speed --provider claude --model opus --view requests
 | `Space`, `r` | Pause automatic updates / refresh |
 | `?`, `q` / `Ctrl-C` | Help / quit |
 
-Updates run in the background every five seconds. `--interval` adjusts this. The TUI retains at least 200 recent requests; `--limit` can increase that window.
+Updates run in the background every five seconds. `--interval` adjusts this (minimum 1 second). The TUI retains at least 200 recent requests; `--limit` can increase that window.
 
 ## Scriptable by design
 
@@ -153,15 +151,16 @@ Text tables have borders, right-aligned numeric columns and, for summaries, a to
 
 | Option | Purpose |
 | --- | --- |
-| `--provider all\|codex\|claude\|dsh\|magpie` | Choose source |
+| `--provider all\|codex\|claude\|dsh\|other` | Choose source; Magpie calls are filed under their agent, `other` shows the rest |
 | `--model`, `--session` | Substring filters |
 | `--today`, `--days N`, `--all-time`, `--since`, `--until` | Time range |
-| `--timezone` | IANA timezone; defaults to `TZ` or local timezone |
+| `--timezone` | IANA timezone; defaults to `TZ` when it names one, else the local timezone |
 | `--view` | Initial dashboard view |
 | `--theme dark\|light` | Dashboard colors (`TOKEN_SPEED_THEME`); `T` toggles while running |
 | `--table`, `--json` | One-shot text table or JSON report; bypass the TUI |
 | `--group hour\|day\|model`, `--format table\|json\|csv` | Report grouping and format |
 | `--max-gap SECONDS` | Maximum usable timing interval; default 300 |
+| `--interval SECONDS` | Dashboard refresh period; default 5, minimum 1 |
 | `--codex-dir`, `--claude-dir`, `--dsh-dir`, `--magpie-dir`, `--cache` | Override source / index locations |
 | `--refresh` | Rebuild cached entries |
 
@@ -187,7 +186,7 @@ Maintainers: [npm packaging and publishing](docs/publishing.md).
 
 ## Upstream and credits
 
-This is a fork of **[william1010121/token-speed](https://github.com/william1010121/token-speed)** (MIT), which provides the Codex and Claude Code parsers, the four views, the SQLite index and the npm / Cargo packaging. This fork adds:
+This is a fork of **[william1010121/token-speed](https://github.com/william1010121/token-speed)** (MIT), which provides the Codex and Claude Code parsers, the four views, the SQLite index and the release / npm packaging. This fork adds:
 
 - **DSH** (DeepSeek Harness) as a source, with per-step timing.
 - The **Magpie** gateway ledger as a source, so agents behind it are counted and gaps in their own logs are filled.

@@ -677,10 +677,37 @@ fn export_visual_preview() {
     };
     let mut app = demo_app();
     app.range = app::Range::Today;
+    // Show the DSH source too, with a stretch of untimed usage.
+    let dsh: Vec<Record> = app
+        .records
+        .iter()
+        .filter(|r| r.provider == Source::Claude && r.id.ends_with("-0"))
+        .map(|r| {
+            let hour: u32 = r.id[2..r.id.len() - 2].parse().unwrap();
+            Record {
+                provider: Source::Dsh,
+                session: "demo-dsh".into(),
+                id: format!("d-{hour}"),
+                model: "deepseek-v4.1-flash".into(),
+                timestamp: r.timestamp + 90.0,
+                start: (!(14..17).contains(&hour)).then_some(r.timestamp + 84.0),
+                output_tokens: 700 + hour as u64 * 15,
+                timing_source: "step-boundary".into(),
+                speed_mode: None,
+                ..r.clone()
+            }
+        })
+        .collect();
+    app.records.extend(dsh);
+    app.records
+        .sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+    app.rebuild().unwrap();
     for screen in args::Screen::ALL {
         app.set_screen(screen);
         if screen == args::Screen::Timeline {
             app.cursor = 9;
+            // Three sources leave each split plot too short to read.
+            app.overlay = true;
         }
         let mut term = Terminal::new(TestBackend::new(140, 46)).unwrap();
         term.draw(|f| ui::draw(f, &mut app)).unwrap();

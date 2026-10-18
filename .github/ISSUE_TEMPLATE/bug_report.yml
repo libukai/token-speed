@@ -9,7 +9,7 @@ body:
     id: version
     attributes:
       label: Version and platform
-      placeholder: token-speed 0.3.0, macOS ARM64, terminal 120 × 40
+      placeholder: token-speed 0.4.0, macOS ARM64, terminal 120 × 40
     validations:
       required: true
   - type: textarea

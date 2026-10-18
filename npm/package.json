@@ -1,6 +1,6 @@
 {
-  "name": "token-speed",
-  "version": "0.3.1",
+  "name": "@libukai/token-speed",
+  "version": "0.4.0",
   "description": "A terminal observatory for Codex, Claude Code, DSH and Magpie token throughput",
   "license": "MIT",
   "repository": {
@@ -9,7 +9,7 @@
   },
   "homepage": "https://github.com/libukai/token-speed#readme",
   "bugs": "https://github.com/libukai/token-speed/issues",
-  "keywords": ["codex", "claude", "tui", "tokens", "cli"],
+  "keywords": ["codex", "claude", "deepseek", "magpie", "tui", "tokens", "cli"],
   "bin": { "token-speed": "bin/token-speed.cjs" },
   "files": ["bin/", "vendor/", "check-package.cjs", "README.md", "LICENSE"],
   "os": ["darwin", "linux"],

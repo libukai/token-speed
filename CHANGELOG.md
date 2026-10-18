@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## [0.4.0](https://github.com/libukai/token-speed/releases/tag/v0.4.0) — 2026-10-18
+
+First release of this fork. The cache is rebuilt once.
 
 - Fix: Codex forked threads (subagents) were attributed to their parent, so their own usage was dropped and legacy counters were reported instead. The cache is rebuilt once.
 - Source directory flags (`--codex-dir`, `--claude-dir`, `--dsh-dir`) are repeatable.
@@ -10,6 +12,15 @@
 - DSH (DeepSeek Harness) source: reads `~/.dsh/sessions` zstd session logs, times each model step, and adds a fourth source to the TUI and reports.
 - Magpie gateway ledger (`~/.config/magpie/usage.jsonl`, `--magpie-dir`): calls are filed under the agent that made them, and the native log wins where both exist. Calls from agents without a parser go to a hidden `other` source (`--provider other`).
 - The live status moved from above the key legend to under the title.
+- Fix: a gateway record could replace the agent's own record with the same id, and a stale native start could hide gateway-only calls.
+- Fix: Magpie calls without a response id collapsed into one; Claude messages copied into a resumed session were counted twice.
+- Fix: a cold index held the cache write lock throughout, so a second instance could fail with "database is locked". The cache now uses WAL and short write batches.
+- Fix: a file vanishing mid-index failed the whole pass; it is now a warning.
+- Fix: a day whose local midnight is skipped by DST could not be selected, and pressing `t` on it closed the TUI. Failed actions now show in the status line.
+- `TZ` in POSIX form (`:/etc/localtime`, `JST-9`) falls back to the system zone; `--interval` must be at least 1 second.
+- The selected request or model stays selected across refreshes.
+- CSV cells starting like a spreadsheet formula are prefixed with `'`.
+- npm package renamed to `@libukai/token-speed`.
 
 ## [0.3.1](https://github.com/william1010121/token-speed/releases/tag/v0.3.1) — 2026-10-08
 
