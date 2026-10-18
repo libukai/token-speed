@@ -1376,6 +1376,40 @@ fn magpie_ledger_files_calls_under_their_agent_without_double_counting() {
 }
 
 #[test]
+fn live_status_sits_under_the_title_and_never_clips() {
+    let mut app = demo_app();
+    for (width, height) in [(140u16, 30u16), (100, 30), (80, 24), (60, 20)] {
+        let mut term = Terminal::new(TestBackend::new(width, height)).unwrap();
+        term.draw(|f| ui::draw(f, &mut app)).unwrap();
+        let buffer = term.backend().buffer();
+        let row = |y: u16| -> String { (0..width).map(|x| buffer[(x, y)].symbol()).collect() };
+        // Title on the second row, status right below it.
+        assert!(row(1).contains("TOKEN SPEED"));
+        let status = row(2);
+        // The status dot sits in the same column as the title's diamond.
+        let column = |line: String, mark: char| line.chars().position(|c| c == mark);
+        assert_eq!(column(row(1), '◈'), column(status.clone(), '●'));
+        assert!(
+            status.contains("refreshed 0s ago"),
+            "clipped at {width}: {status}"
+        );
+        assert!(!status.contains("local token telemetry"));
+        // The status moved up, so the legend row holds keys only, with a
+        // blank row on each side: the view above, the terminal edge below.
+        assert!(!row(height - 2).contains("refreshed"));
+        assert!(row(height - 2).contains("quit"), "legend at {width}");
+        assert!(
+            row(height - 3).trim().is_empty(),
+            "no gap above legend at {width}"
+        );
+        assert!(
+            row(height - 1).trim().is_empty(),
+            "no margin below legend at {width}"
+        );
+    }
+}
+
+#[test]
 fn hidden_source_stays_out_of_every_view_unless_asked_for() {
     let dir = tempfile::tempdir().unwrap();
     let ledger = |agent: &str, id: &str| {

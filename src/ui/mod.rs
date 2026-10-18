@@ -50,6 +50,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Constraint::Length(2),
         Constraint::Length(2),
         Constraint::Min(8),
+        // Breathing room between the view and the key legend.
         Constraint::Length(1),
         Constraint::Length(1),
     ])
@@ -64,7 +65,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Screen::Models => model_view(f, layout[3], app),
         Screen::Requests => request_view(f, layout[3], app),
     }
-    status(f, layout[4], app);
     let keyed = Source::ALL.iter().filter(|s| !s.spec().hidden).count();
     let sources = format!("1-{}", keyed + 1);
     let items = if area.width < 110 {
@@ -120,10 +120,7 @@ fn header(f: &mut Frame, area: Rect, app: &App) {
                 Span::styled(" SPEED", bold(pal.mint)),
                 Span::styled("  /  observatory", style(pal.muted)),
             ]),
-            Line::from(Span::styled(
-                "   Codex + Claude + DSH  ·  local token telemetry",
-                style(pal.muted),
-            )),
+            status_line(app, columns[0].width),
         ]),
         columns[0],
     );
@@ -196,9 +193,10 @@ fn toolbar(f: &mut Frame, area: Rect, app: &mut App) {
     right.render(f, halves[1], true, app);
 }
 
-fn status(f: &mut Frame, area: Rect, app: &App) {
+/// Under the title: what the dashboard is doing now, or what went wrong.
+fn status_line(app: &App, width: u16) -> Line<'static> {
     let pal = app.palette();
-    let line = if let Some(e) = &app.error {
+    if let Some(e) = &app.error {
         Line::styled(format!(" ! {e}  ·  r to retry"), style(pal.gold))
     } else if app.loading {
         let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
@@ -215,30 +213,33 @@ fn status(f: &mut Frame, area: Rect, app: &App) {
         ])
     } else {
         let age = app.refreshed.map_or(0, |t| t.elapsed().as_secs());
+        let files = app.meta.parsed_files + app.meta.cached_files;
+        let warnings = match app.meta.warnings.len() {
+            0 => String::new(),
+            n => format!(" · {n} warnings (? for details)"),
+        };
         let filter = if app.search.is_empty() {
             String::new()
         } else {
             format!(" · filter: {}", app.search)
         };
+        // Most to least informative: what is measured goes first when there
+        // is room, and the freshness and warnings are what stay.
+        let note = if width >= 100 {
+            format!(
+                "Estimated request throughput · gaps > {:.0}s excluded · {files} files · refreshed {age}s ago",
+                app.args.max_gap
+            )
+        } else if width >= 62 {
+            format!("Estimated throughput · {files} files · refreshed {age}s ago")
+        } else {
+            format!("refreshed {age}s ago")
+        };
         Line::from(vec![
             Span::styled(" ● ", style(if app.paused { pal.gold } else { pal.mint })),
-            Span::styled(
-                format!(
-                    "Estimated request throughput · gaps > {:.0}s excluded · {} files · refreshed {age}s ago{}{}",
-                    app.args.max_gap,
-                    app.meta.parsed_files + app.meta.cached_files,
-                    filter,
-                    if app.meta.warnings.is_empty() {
-                        String::new()
-                    } else {
-                        format!(" · {} warnings (? for details)", app.meta.warnings.len())
-                    }
-                ),
-                style(pal.muted),
-            ),
+            Span::styled(format!("{note}{filter}{warnings}"), style(pal.muted)),
         ])
-    };
-    f.render_widget(Paragraph::new(line), area);
+    }
 }
 
 fn navigation(f: &mut Frame, area: Rect, app: &mut App) {
