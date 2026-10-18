@@ -96,12 +96,15 @@ pub(super) fn records_table(f: &mut Frame, area: Rect, app: &mut App) {
                         Cell::from(r.provider.id()).style(style(pal.accent(r.provider))),
                         Cell::from(short_model(&r.model)),
                         Cell::from(r.speed_mode.clone().unwrap_or_else(|| "—".into())),
-                        Cell::from(grouped(r.output_tokens)),
+                        Cell::from(Line::from(grouped(r.output_tokens)).right_aligned()),
                         Cell::from(
-                            r.duration(app.args.max_gap)
-                                .map_or_else(|| "—".into(), |d| format!("{d:.1}s")),
+                            Line::from(
+                                r.duration(app.args.max_gap)
+                                    .map_or_else(|| "—".into(), |d| format!("{d:.1}s")),
+                            )
+                            .right_aligned(),
                         ),
-                        Cell::from(rate(r.rate(app.args.max_gap)))
+                        Cell::from(Line::from(rate(r.rate(app.args.max_gap))).right_aligned())
                             .style(bold(pal.accent(r.provider))),
                         Cell::from(r.session.chars().take(12).collect::<String>()),
                     ])
@@ -133,7 +136,9 @@ pub(super) fn records_table(f: &mut Frame, area: Rect, app: &mut App) {
                             .unwrap_or(0)
                             .clamp("Model".len(), 28) as u16,
                     ),
-                    Constraint::Length(8),
+                    // Mode absorbs spare width (left-aligned, next to Model);
+                    // the numeric columns after it are right-aligned.
+                    Constraint::Min(8),
                     count_column_width(
                         "Output",
                         app.view
@@ -145,16 +150,27 @@ pub(super) fn records_table(f: &mut Frame, area: Rect, app: &mut App) {
                     ),
                     Constraint::Length(5),
                     Constraint::Length(10),
-                    Constraint::Min(8),
+                    Constraint::Length(12),
                 ],
                 rows.collect(),
             )
         };
     // A one-line header and its bottom margin precede the rows.
     const HEADER_LINES: u16 = 2;
-    let header = Row::new(headers)
-        .style(header_style)
-        .bottom_margin(HEADER_LINES - 1);
+    let right_cols: &[usize] = if app.screen == Screen::Requests {
+        &[4, 5, 6]
+    } else {
+        &[]
+    };
+    let header = Row::new(headers.into_iter().enumerate().map(|(i, h)| {
+        if right_cols.contains(&i) {
+            Cell::from(Line::from(h).right_aligned())
+        } else {
+            Cell::from(h)
+        }
+    }))
+    .style(header_style)
+    .bottom_margin(HEADER_LINES - 1);
     let block = pal.block(title);
     let inner = block.inner(area);
     let table = Table::new(rows, widths)
