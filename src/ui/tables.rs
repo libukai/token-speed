@@ -103,7 +103,7 @@ pub(super) fn records_table(f: &mut Frame, area: Rect, app: &mut App) {
                         ),
                         Cell::from(rate(r.rate(app.args.max_gap)))
                             .style(bold(pal.accent(r.provider))),
-                        Cell::from(r.session.chars().take(9).collect::<String>()),
+                        Cell::from(r.session.chars().take(12).collect::<String>()),
                     ])
                 });
             (
@@ -120,7 +120,19 @@ pub(super) fn records_table(f: &mut Frame, area: Rect, app: &mut App) {
                 vec![
                     Constraint::Length(15),
                     Constraint::Length(8),
-                    Constraint::Min(12),
+                    // Sized to content (capped) so spare width goes to the
+                    // trailing Session column, not between Model and Mode.
+                    Constraint::Length(
+                        app.view
+                            .rows
+                            .iter()
+                            .rev()
+                            .take(app.args.limit.max(200))
+                            .map(|r| Line::from(short_model(&r.model)).width())
+                            .max()
+                            .unwrap_or(0)
+                            .clamp("Model".len(), 28) as u16,
+                    ),
                     Constraint::Length(8),
                     count_column_width(
                         "Output",
@@ -131,9 +143,9 @@ pub(super) fn records_table(f: &mut Frame, area: Rect, app: &mut App) {
                             .take(app.args.limit.max(200))
                             .map(|r| grouped(r.output_tokens)),
                     ),
-                    Constraint::Length(7),
+                    Constraint::Length(5),
                     Constraint::Length(10),
-                    Constraint::Length(10),
+                    Constraint::Min(8),
                 ],
                 rows.collect(),
             )
@@ -150,7 +162,7 @@ pub(super) fn records_table(f: &mut Frame, area: Rect, app: &mut App) {
         .block(block)
         .row_highlight_style(Style::default().bg(pal.selected).fg(pal.ink))
         .highlight_symbol("› ")
-        .column_spacing(1);
+        .column_spacing(if area.width >= 100 { 2 } else { 1 });
     f.render_stateful_widget(table, area, &mut app.table);
     // One-line rows start below the header; `offset` is the first one drawn,
     // since the table scrolls to keep the selection visible.
