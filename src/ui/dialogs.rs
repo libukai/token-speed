@@ -15,7 +15,9 @@ use ratatui::{Frame, text::Line};
 
 /// "1 / 2 / 3 / 4  All / Codex / Claude / DSH", from the source registry.
 fn source_keys() -> String {
-    let filters = std::iter::once(Filter::ALL).chain(Source::ALL.map(Filter::only));
+    let filters = std::iter::once(Filter::ALL)
+        .chain(Source::ALL.map(Filter::only))
+        .filter(|f| f.keyed());
     let (keys, names): (Vec<_>, Vec<_>) =
         filters.map(|f| (f.digit().to_string(), f.label())).unzip();
     format!("{:<14}{}", keys.join(" / "), names.join(" / "))

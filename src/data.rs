@@ -3,7 +3,7 @@
 
 use crate::{
     args::{Args, Group},
-    source::Source,
+    source::{Filter, Source},
 };
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Duration, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
@@ -67,7 +67,9 @@ pub fn collect(
     let mut tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let roots = Source::ALL
         .into_iter()
-        .filter(|s| args.provider.matches(*s))
+        // The gateway ledger files calls under the agents that made them, so
+        // it is read whichever source is selected, hidden or not.
+        .filter(|s| *s == Source::Other || args.provider.matches(*s))
         .flat_map(|s| {
             args.dirs(s)
                 .iter()
@@ -80,7 +82,7 @@ pub fn collect(
         let provider = source.id();
         if !root.exists() {
             // Optional sources stay quiet unless explicitly requested.
-            if !(source.spec().optional && args.provider.0.is_none()) {
+            if !source.spec().optional || args.provider == Filter::only(source) {
                 meta.warnings
                     .push(format!("Missing log directory: {}", root.display()));
             }
@@ -167,9 +169,69 @@ pub fn collect(
     }
     tx.commit()?;
     progress(meta.parsed_files, meta.cached_files);
-    let mut rows: Vec<_> = result.into_values().collect();
+    let mut rows = drop_mirrored(result.into_values().collect());
     rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
     Ok((rows, meta))
+}
+
+/// Calls the gateway ledger shares with an agent's own log are counted once,
+/// from the agent's log. The two have no call id in common, so a ledger
+/// record is dropped when its completion falls within `SLACK` of a native
+/// request of the same agent: of the same session when the ledger names the
+/// agent's own session (Codex, Claude), else of any session (DSH). The
+/// rest (an agent with no log, or the stretches where the log is missing)
+/// stay.
+const SLACK: f64 = 10.0;
+fn drop_mirrored(rows: Vec<Record>) -> Vec<Record> {
+    use crate::parse::magpie::{GATEWAY, NO_SESSION};
+    type Spans = Vec<(f64, f64)>;
+    let mut by_source: HashMap<Source, Spans> = HashMap::new();
+    let mut by_session: HashMap<(Source, &str), Spans> = HashMap::new();
+    for r in rows.iter().filter(|r| r.timing_source != GATEWAY) {
+        let span = (r.start.unwrap_or(r.timestamp) - SLACK, r.timestamp + SLACK);
+        by_source.entry(r.provider).or_default().push(span);
+        by_session
+            .entry((r.provider, r.session.as_str()))
+            .or_default()
+            .push(span);
+    }
+    let merge = |spans: &mut Spans| {
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut merged: Spans = Vec::new();
+        for &(from, to) in spans.iter() {
+            match merged.last_mut() {
+                Some(last) if from <= last.1 => last.1 = last.1.max(to),
+                _ => merged.push((from, to)),
+            }
+        }
+        *spans = merged;
+    };
+    by_source.values_mut().for_each(merge);
+    by_session.values_mut().for_each(merge);
+    let covers = |spans: Option<&Spans>, at: f64| {
+        spans.is_some_and(|spans| {
+            let i = spans.partition_point(|s| s.1 < at);
+            spans.get(i).is_some_and(|s| s.0 <= at)
+        })
+    };
+    let mirrored: Vec<bool> = rows
+        .iter()
+        .map(|r| {
+            r.timing_source == GATEWAY
+                && if r.session == NO_SESSION || r.provider == Source::Other {
+                    covers(by_source.get(&r.provider), r.timestamp)
+                } else {
+                    covers(
+                        by_session.get(&(r.provider, r.session.as_str())),
+                        r.timestamp,
+                    )
+                }
+        })
+        .collect();
+    rows.into_iter()
+        .zip(mirrored)
+        .filter_map(|(r, mirrored)| (!mirrored).then_some(r))
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -246,6 +308,8 @@ pub fn select(rows: &[Record], args: &Args, clock: Clock) -> Result<Vec<Record>>
         .iter()
         .filter(|r| {
             args.provider.matches(r.provider)
+                // A hidden source is left out unless it is asked for.
+                && (!r.provider.spec().hidden || args.provider == Filter::only(r.provider))
                 && since.is_none_or(|s| r.timestamp >= s)
                 && until.is_none_or(|u| r.timestamp < u)
                 && args

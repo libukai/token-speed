@@ -135,6 +135,8 @@ pub struct Args {
     pub claude_dir: Vec<PathBuf>,
     #[arg(long, default_values_os_t = [Source::Dsh.default_dir()], help = "DSH home (DSH_HOME); repeatable")]
     pub dsh_dir: Vec<PathBuf>,
+    #[arg(long, default_values_os_t = [Source::Other.default_dir()], help = "Magpie home (MAGPIE_HOME); repeatable")]
+    pub magpie_dir: Vec<PathBuf>,
     #[arg(long, default_value_os_t=cache_path())]
     pub cache: PathBuf,
     #[arg(long)]
@@ -155,6 +157,7 @@ impl Args {
             Source::Codex => &self.codex_dir,
             Source::Claude => &self.claude_dir,
             Source::Dsh => &self.dsh_dir,
+            Source::Other => &self.magpie_dir,
         }
     }
 

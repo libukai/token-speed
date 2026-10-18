@@ -4,6 +4,7 @@
 pub mod claude;
 pub mod codex;
 pub mod dsh;
+pub mod magpie;
 
 use crate::data::Record;
 use anyhow::Result;

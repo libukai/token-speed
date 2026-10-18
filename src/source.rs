@@ -23,6 +23,7 @@ pub enum Source {
     Codex,
     Claude,
     Dsh,
+    Other,
 }
 
 pub struct Spec {
@@ -39,6 +40,9 @@ pub struct Spec {
     /// Hidden until its logs are indexed, and silent when its home is
     /// missing, unless explicitly selected.
     pub optional: bool,
+    /// Left out of every view and report, and with no tab or digit key,
+    /// unless `--provider` names it.
+    pub hidden: bool,
     /// Whether a file name is a log of this source.
     pub is_log: fn(&str) -> bool,
     pub parse: fn(&Path) -> Result<parse::Parsed>,
@@ -52,6 +56,7 @@ const SPECS: [Spec; Source::COUNT] = [
         home: ".codex",
         roots: &["sessions", "archived_sessions"],
         optional: false,
+        hidden: false,
         is_log: parse::is_jsonl,
         parse: parse::codex::parse,
     },
@@ -62,6 +67,7 @@ const SPECS: [Spec; Source::COUNT] = [
         home: ".claude",
         roots: &["projects"],
         optional: false,
+        hidden: false,
         is_log: parse::is_jsonl,
         parse: parse::claude::parse,
     },
@@ -72,8 +78,20 @@ const SPECS: [Spec; Source::COUNT] = [
         home: ".dsh",
         roots: &["sessions"],
         optional: true,
+        hidden: false,
         is_log: parse::dsh::is_log,
         parse: parse::dsh::parse,
+    },
+    Spec {
+        id: "other",
+        label: "Other",
+        env: "MAGPIE_HOME",
+        home: ".config/magpie",
+        roots: &["usage.jsonl"],
+        optional: true,
+        hidden: true,
+        is_log: parse::is_jsonl,
+        parse: parse::magpie::parse,
     },
 ];
 
@@ -87,14 +105,14 @@ const _: () = {
         i += 1;
     }
     match Source::Codex {
-        Source::Codex | Source::Claude | Source::Dsh => {}
+        Source::Codex | Source::Claude | Source::Dsh | Source::Other => {}
     }
 };
 
 impl Source {
-    pub const COUNT: usize = 3;
+    pub const COUNT: usize = 4;
     /// Display order; `index` positions per-source arrays.
-    pub const ALL: [Self; Self::COUNT] = [Self::Codex, Self::Claude, Self::Dsh];
+    pub const ALL: [Self; Self::COUNT] = [Self::Codex, Self::Claude, Self::Dsh, Self::Other];
 
     pub fn index(self) -> usize {
         self as usize
@@ -178,13 +196,21 @@ impl Filter {
     pub fn matches(self, s: Source) -> bool {
         self.0.is_none_or(|only| only == s)
     }
-    /// Filter selected by a digit key: 1 is all, 2.. follow `Source::ALL`.
+    /// Filter selected by a digit key: 1 is all, 2.. follow `Source::ALL`
+    /// without the hidden sources.
     pub fn from_digit(d: u32) -> Option<Self> {
-        FILTERS.get(d.checked_sub(1)? as usize).copied()
+        let key = d.checked_sub(1)? as usize;
+        FILTERS.iter().copied().filter(|f| f.keyed()).nth(key)
+    }
+    /// Whether a digit key selects this filter: all, or a source that is
+    /// not hidden.
+    pub fn keyed(self) -> bool {
+        self.0.is_none_or(|s| !s.spec().hidden)
     }
     /// The digit key that selects this filter.
     pub fn digit(self) -> u32 {
-        self.0.map_or(1, |s| s.index() as u32 + 2)
+        let at = FILTERS.iter().position(|f| *f == self).unwrap_or(0);
+        FILTERS[..at].iter().filter(|f| f.keyed()).count() as u32 + 1
     }
     pub fn label(self) -> &'static str {
         self.0.map_or("All", Source::label)

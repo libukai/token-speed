@@ -84,6 +84,7 @@ impl Palette {
             Some(Source::Codex) => self.mint,
             Some(Source::Claude) => self.gold,
             Some(Source::Dsh) => self.rose,
+            Some(Source::Other) => self.purple,
             None => self.ink,
         }
     }

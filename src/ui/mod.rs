@@ -65,7 +65,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Screen::Requests => request_view(f, layout[3], app),
     }
     status(f, layout[4], app);
-    let sources = format!("1-{}", Source::COUNT + 1);
+    let keyed = Source::ALL.iter().filter(|s| !s.spec().hidden).count();
+    let sources = format!("1-{}", keyed + 1);
     let items = if area.width < 110 {
         vec![
             ("q", "quit"),

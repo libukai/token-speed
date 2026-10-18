@@ -433,6 +433,7 @@ fn cache_append_dedup_and_deleted_files() {
     .unwrap();
     let mut args = Args::parse_from(["token-speed", "--provider", "codex"]);
     args.codex_dir = vec![dir.path().into()];
+    args.magpie_dir = vec![dir.path().join("none")];
     args.cache = dir.path().join("index.sqlite3");
     let (rows, meta) = data::collect(&args, |_, _| {}).unwrap();
     assert_eq!(meta.parsed_files, 1);
@@ -502,6 +503,7 @@ fn demo_app() -> app::App {
     args.codex_dir = vec!["/nonexistent/codex".into()];
     args.claude_dir = vec!["/nonexistent/claude".into()];
     args.dsh_dir = vec!["/nonexistent/dsh".into()];
+    args.magpie_dir = vec!["/nonexistent/magpie".into()];
     let clock = Clock::new(Some("UTC")).unwrap();
     let mut app = app::App::new(args, clock);
     let base = Utc
@@ -753,6 +755,7 @@ fn concurrent_cache_refreshes_do_not_deadlock() {
     }
     let mut args = Args::parse_from(["token-speed", "--provider", "codex"]);
     args.codex_dir = vec![dir.path().into()];
+    args.magpie_dir = vec![dir.path().join("none")];
     args.cache = dir.path().join("index.sqlite3");
     data::collect(&args, |_, _| {}).unwrap();
     args.refresh = true;
@@ -887,6 +890,7 @@ fn dsh_steps_cache_and_frames() {
 
     let mut args = Args::parse_from(["token-speed", "--provider", "dsh", "--all-time"]);
     args.dsh_dir = vec![dir.path().into()];
+    args.magpie_dir = vec![dir.path().join("none")];
     args.cache = dir.path().join("index.sqlite3");
     let (rows, meta) = data::collect(&args, |_, _| {}).unwrap();
     assert_eq!(rows.len(), 3);
@@ -927,6 +931,7 @@ fn dsh_reads_every_home_without_double_counting() {
     write("other", "b", "session.v4.jsonl.zstd", &[40]);
     let mut args = Args::parse_from(["token-speed", "--provider", "dsh", "--all-time"]);
     args.dsh_dir = vec![dir.path().join("dsh"), dir.path().join("other")];
+    args.magpie_dir = vec![dir.path().join("none")];
     args.cache = dir.path().join("index.sqlite3");
     let (rows, meta) = data::collect(&args, |_, _| {}).unwrap();
     assert_eq!(meta.parsed_files, 3);
@@ -945,8 +950,14 @@ fn optional_source_is_visible_when_its_directory_exists() {
     std::fs::create_dir_all(dir.join("sessions")).unwrap();
     let mut args = Args::parse_from(["token-speed"]);
     args.dsh_dir = vec![dir.clone()];
+    args.magpie_dir = vec![dir.clone()];
+    std::fs::write(dir.join("usage.jsonl"), "").unwrap();
     let app = app::App::new(args, Clock::new(Some("UTC")).unwrap());
-    assert_eq!(app.visible_sources(), Source::ALL);
+    // The gateway ledger is filed under the agents in it: no tab of its own.
+    assert_eq!(
+        app.visible_sources(),
+        [Source::Codex, Source::Claude, Source::Dsh]
+    );
     std::fs::remove_dir_all(dir).unwrap();
 }
 #[test]
@@ -959,7 +970,10 @@ fn dsh_source_appears_once_indexed() {
     extra.model = "deepseek-test".into();
     app.records.push(extra);
     app.rebuild().unwrap();
-    assert_eq!(app.visible_sources(), Source::ALL);
+    assert_eq!(
+        app.visible_sources(),
+        [Source::Codex, Source::Claude, Source::Dsh]
+    );
     assert_eq!(app.view.sources[2].requests, 1);
     press(&mut app, KeyCode::Char('4'));
     assert!(app.view.rows.iter().all(|r| r.provider == Source::Dsh));
@@ -1218,10 +1232,14 @@ fn source_registry_is_consistent() {
         assert!(!s.spec().roots.is_empty());
         let args = Args::parse_from(["token-speed", "--provider", s.id()]);
         assert_eq!(args.provider, Filter::only(s));
-        assert_eq!(
-            Filter::from_digit(Filter::only(s).digit()),
-            Some(Filter::only(s))
-        );
+        // A hidden source has no digit key; the others round-trip.
+        assert_eq!(Filter::only(s).keyed(), !s.spec().hidden);
+        if !s.spec().hidden {
+            assert_eq!(
+                Filter::from_digit(Filter::only(s).digit()),
+                Some(Filter::only(s))
+            );
+        }
     }
     assert_eq!(Source::from_id("unknown"), None, "no silent fallback");
     assert_eq!(
@@ -1231,12 +1249,18 @@ fn source_registry_is_consistent() {
     );
     assert_eq!(Filter::from_digit(1), Some(Filter::ALL));
     assert_eq!(Filter::from_digit(0), None);
-    assert_eq!(Filter::from_digit(Source::COUNT as u32 + 2), None);
+    let keyed = Source::ALL.iter().filter(|s| !s.spec().hidden).count() as u32;
+    assert!(Filter::from_digit(keyed + 1).is_some());
+    assert_eq!(
+        Filter::from_digit(keyed + 2),
+        None,
+        "hidden sources get no key"
+    );
     let values: Vec<_> = Filter::value_variants()
         .iter()
         .map(|f| f.to_possible_value().unwrap().get_name().to_owned())
         .collect();
-    assert_eq!(values, ["all", "codex", "claude", "dsh"]);
+    assert_eq!(values, ["all", "codex", "claude", "dsh", "other"]);
     // Each source has its own directory flag and accent color.
     let args = Args::parse_from(["token-speed"]);
     let dirs: HashSet<_> = Source::ALL
@@ -1257,7 +1281,7 @@ fn source_registry_is_consistent() {
 #[test]
 fn digit_keys_follow_the_registry() {
     let mut app = demo_app();
-    for s in Source::ALL {
+    for s in Source::ALL.into_iter().filter(|s| !s.spec().hidden) {
         let key = char::from_digit(Filter::only(s).digit(), 10).unwrap();
         press(&mut app, KeyCode::Char(key));
         assert_eq!(app.args.provider, Filter::only(s));
@@ -1265,11 +1289,125 @@ fn digit_keys_follow_the_registry() {
     }
     press(&mut app, KeyCode::Char('1'));
     assert_eq!(app.args.provider, Filter::ALL);
-    let key = char::from_digit(Source::COUNT as u32 + 2, 10).unwrap();
+    let keyed = Source::ALL.iter().filter(|s| !s.spec().hidden).count() as u32;
+    let key = char::from_digit(keyed + 2, 10).unwrap();
     press(&mut app, KeyCode::Char(key));
     assert_eq!(
         app.args.provider,
         Filter::ALL,
         "an unused digit does nothing"
     );
+}
+
+fn magpie_line(agent: &str, t: &str, ms: u64, extra: Value) -> String {
+    let mut v = json!({"agent": agent, "t": t, "ms": ms, "model": "m", "in": 100,
+        "cache_read": 900, "out": 50, "status": 200});
+    v.as_object_mut()
+        .unwrap()
+        .extend(extra.as_object().unwrap().clone());
+    v.to_string()
+}
+
+#[test]
+fn magpie_ledger_files_calls_under_their_agent_without_double_counting() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = [
+        // Inside the span the DSH log covers below: the DSH log counts it.
+        magpie_line(
+            "dsh",
+            "2026-10-03T04:00:03Z",
+            4000,
+            json!({"response_id": "a"}),
+        ),
+        // After it: only the ledger saw this one.
+        magpie_line(
+            "dsh",
+            "2026-10-03T05:00:00Z",
+            2000,
+            json!({"response_id": "b"}),
+        ),
+        // An agent with no parser, named by its session.
+        magpie_line(
+            "pi",
+            "2026-10-03T05:00:00Z",
+            2000,
+            json!({"native_session": "s1"}),
+        ),
+        // No usage: a cancelled call.
+        magpie_line(
+            "dsh",
+            "2026-10-03T05:00:09Z",
+            10,
+            json!({"in": 0, "cache_read": 0, "out": 0, "status": 499}),
+        ),
+    ]
+    .join("\n");
+    fs::write(dir.path().join("usage.jsonl"), log + "\n").unwrap();
+    let native = dir.path().join("dsh/sessions/s");
+    fs::create_dir_all(&native).unwrap();
+    let lines = [
+        dsh(0, "step/start", json!({"turn": 1, "step": 1})),
+        dsh_message(5, 1, "m1", 200),
+    ];
+    fs::write(native.join("session.jsonl"), lines.join("\n") + "\n").unwrap();
+    let mut args = Args::parse_from(["token-speed", "--all-time"]);
+    args.codex_dir = vec![dir.path().join("none")];
+    args.claude_dir = vec![dir.path().join("none")];
+    args.dsh_dir = vec![dir.path().join("dsh")];
+    args.magpie_dir = vec![dir.path().into()];
+    args.cache = dir.path().join("index.sqlite3");
+    let (rows, _) = data::collect(&args, |_, _| {}).unwrap();
+    let by = |s: Source| rows.iter().filter(|r| r.provider == s).collect::<Vec<_>>();
+    assert_eq!(
+        by(Source::Dsh).len(),
+        2,
+        "native call plus the ledger-only one"
+    );
+    let ledger = by(Source::Dsh).into_iter().find(|r| r.id == "b").unwrap();
+    // Gateway input counts cache like the other sources do; reasoning stays inside output.
+    assert_eq!((ledger.input_tokens, ledger.cached_tokens), (1000, 900));
+    assert_eq!(ledger.rate(300.0), Some(25.0));
+    assert_eq!(by(Source::Other).len(), 1);
+    assert_eq!(by(Source::Other)[0].session, "pi/s1");
+    // Selecting one agent still brings in its ledger calls.
+    args.provider = Filter::only(Source::Dsh);
+    let (rows, _) = data::collect(&args, |_, _| {}).unwrap();
+    assert_eq!(rows.iter().filter(|r| r.provider == Source::Dsh).count(), 2);
+}
+
+#[test]
+fn hidden_source_stays_out_of_every_view_unless_asked_for() {
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = |agent: &str, id: &str| {
+        magpie_line(
+            agent,
+            "2026-10-03T04:00:00Z",
+            2000,
+            json!({"response_id": id}),
+        )
+    };
+    let log = [ledger("pi", "p1"), ledger("dsh", "d1")].join("\n");
+    fs::write(dir.path().join("usage.jsonl"), log + "\n").unwrap();
+    let mut args = Args::parse_from(["token-speed", "--all-time"]);
+    args.codex_dir = vec![dir.path().join("none")];
+    args.claude_dir = vec![dir.path().join("none")];
+    args.dsh_dir = vec![dir.path().join("none")];
+    args.magpie_dir = vec![dir.path().into()];
+    args.cache = dir.path().join("index.sqlite3");
+    let clock = Clock::new(Some("UTC")).unwrap();
+    let (rows, _) = data::collect(&args, |_, _| {}).unwrap();
+    // The ledger is still read: its dsh call belongs to a visible source.
+    let all = data::select(&rows, &args, clock).unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].provider, Source::Dsh);
+    // Asking for it by name brings its calls back.
+    args.provider = Filter::only(Source::Other);
+    let only = data::select(&rows, &args, clock).unwrap();
+    assert_eq!(only.len(), 1);
+    assert_eq!(only[0].provider, Source::Other);
+    // And it has no tab or digit key of its own.
+    let mut app = demo_app();
+    app.records.extend(rows);
+    app.rebuild().unwrap();
+    assert!(!app.visible_sources().contains(&Source::Other));
 }

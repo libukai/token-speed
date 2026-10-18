@@ -311,10 +311,13 @@ impl App {
         Source::ALL
             .into_iter()
             .filter(|&s| {
-                !s.spec().optional
-                    || self.args.provider == Filter::only(s)
-                    || self.present[s.index()]
-                    || self.view.indexed[s.index()]
+                let spec = s.spec();
+                // Hidden sources are in no view unless `--provider` asks.
+                (!spec.hidden || self.args.provider == Filter::only(s))
+                    && (!spec.optional
+                        || self.args.provider == Filter::only(s)
+                        || self.present[s.index()]
+                        || self.view.indexed[s.index()])
             })
             .collect()
     }
