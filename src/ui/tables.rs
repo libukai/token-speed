@@ -95,6 +95,7 @@ pub(super) fn records_table(f: &mut Frame, area: Rect, app: &mut App) {
                         Cell::from(app.clock.format(r.timestamp, "%m/%d %H:%M:%S")),
                         Cell::from(r.provider.id()).style(style(pal.accent(r.provider))),
                         Cell::from(short_model(&r.model)),
+                        Cell::from(r.speed_mode.clone().unwrap_or_else(|| "—".into())),
                         Cell::from(grouped(r.output_tokens)),
                         Cell::from(
                             r.duration(app.args.max_gap)
@@ -102,7 +103,7 @@ pub(super) fn records_table(f: &mut Frame, area: Rect, app: &mut App) {
                         ),
                         Cell::from(rate(r.rate(app.args.max_gap)))
                             .style(bold(pal.accent(r.provider))),
-                        Cell::from(r.session.chars().take(10).collect::<String>()),
+                        Cell::from(r.session.chars().take(9).collect::<String>()),
                     ])
                 });
             (
@@ -110,6 +111,7 @@ pub(super) fn records_table(f: &mut Frame, area: Rect, app: &mut App) {
                     "Completed",
                     "Source",
                     "Model",
+                    "Mode",
                     "Output",
                     "Wait",
                     "Est. tok/s",
@@ -118,7 +120,8 @@ pub(super) fn records_table(f: &mut Frame, area: Rect, app: &mut App) {
                 vec![
                     Constraint::Length(15),
                     Constraint::Length(8),
-                    Constraint::Min(14),
+                    Constraint::Min(12),
+                    Constraint::Length(8),
                     count_column_width(
                         "Output",
                         app.view
@@ -128,9 +131,9 @@ pub(super) fn records_table(f: &mut Frame, area: Rect, app: &mut App) {
                             .take(app.args.limit.max(200))
                             .map(|r| grouped(r.output_tokens)),
                     ),
-                    Constraint::Length(8),
+                    Constraint::Length(7),
                     Constraint::Length(10),
-                    Constraint::Length(11),
+                    Constraint::Length(10),
                 ],
                 rows.collect(),
             )
@@ -322,7 +325,7 @@ pub(super) fn distribution(f: &mut Frame, area: Rect, app: &App) {
 
 pub(super) fn request_view(f: &mut Frame, area: Rect, app: &mut App) {
     let pal = app.palette();
-    if area.width < 115 {
+    if area.width < 125 {
         records_table(f, area, app);
         return;
     }

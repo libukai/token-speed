@@ -223,7 +223,9 @@ impl App {
         if !self.search.is_empty() {
             let query = self.search.to_lowercase();
             rows.retain(|r| {
-                r.model.to_lowercase().contains(&query) || r.session.to_lowercase().contains(&query)
+                r.model.to_lowercase().contains(&query)
+                    || r.session.to_lowercase().contains(&query)
+                    || r.speed_mode.as_deref().is_some_and(|m| m.contains(&query))
             });
         }
         let totals = data::summarize(&rows, self.args.max_gap);

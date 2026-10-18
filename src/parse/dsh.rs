@@ -91,6 +91,7 @@ fn record(session: &str, id: &str, p: &Value, end: f64, start: Option<f64>) -> R
         output_tokens: n(u, "outputTokens"),
         reasoning_tokens: n(u, "reasoningTokens"),
         timing_source: "step-boundary".into(),
+        speed_mode: None,
     }
 }
 

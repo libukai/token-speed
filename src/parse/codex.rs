@@ -7,12 +7,18 @@ use anyhow::Result;
 use serde_json::Value;
 use std::path::Path;
 
-fn record(session: &str, id: &str, model: &str, end: f64, start: Option<f64>, u: &Value) -> Record {
+struct Ctx<'a> {
+    session: &'a str,
+    model: &'a str,
+    tier: Option<&'a str>,
+}
+
+fn record(c: &Ctx, id: &str, end: f64, start: Option<f64>, u: &Value) -> Record {
     Record {
         provider: Source::Codex,
-        session: session.into(),
+        session: c.session.into(),
         id: id.into(),
-        model: model.into(),
+        model: c.model.into(),
         timestamp: end,
         start,
         input_tokens: n(u, "input_tokens"),
@@ -21,6 +27,7 @@ fn record(session: &str, id: &str, model: &str, end: f64, start: Option<f64>, u:
         output_tokens: n(u, "output_tokens"),
         reasoning_tokens: n(u, "reasoning_output_tokens"),
         timing_source: "request-boundary".into(),
+        speed_mode: c.tier.map(Into::into),
     }
 }
 
@@ -28,6 +35,7 @@ pub fn parse(path: &Path) -> Result<Parsed> {
     let mut session = file_stem(path);
     let mut seen_meta = false;
     let mut model = "unknown".to_owned();
+    let mut tier: Option<String> = None;
     let mut anchor = None;
     let mut cumulative: Option<Value> = None;
     let (mut modern, mut legacy) = (Vec::new(), Vec::new());
@@ -48,6 +56,11 @@ pub fn parse(path: &Path) -> Result<Parsed> {
             "turn_context" => {
                 model = text(&p["model"]).unwrap_or(&model).to_owned();
             }
+            "event_msg" if sub == "thread_settings_applied" => {
+                if let Some(t) = text(&p["thread_settings"]["service_tier"]) {
+                    tier = Some(t.to_owned());
+                }
+            }
             "event_msg" if sub == "task_started" => {
                 anchor = stamp(&p["started_at"]).or(t);
             }
@@ -64,9 +77,12 @@ pub fn parse(path: &Path) -> Result<Parsed> {
                 }
                 let fallback = format!("line-{index}");
                 modern.push(record(
-                    &session,
+                    &Ctx {
+                        session: &session,
+                        model: &model,
+                        tier: tier.as_deref(),
+                    },
                     text(&p["response_id"]).unwrap_or(&fallback),
-                    &model,
                     t.unwrap(),
                     anchor,
                     &p["usage"],
@@ -103,9 +119,12 @@ pub fn parse(path: &Path) -> Result<Parsed> {
                 };
                 cumulative = Some(total.clone());
                 legacy.push(record(
-                    &session,
+                    &Ctx {
+                        session: &session,
+                        model: &model,
+                        tier: tier.as_deref(),
+                    },
                     &format!("line-{index}"),
-                    &model,
                     t.unwrap(),
                     anchor,
                     &usage,

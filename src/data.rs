@@ -16,7 +16,7 @@ use std::{
 };
 use walkdir::WalkDir;
 
-const CACHE_VERSION: i64 = 4;
+const CACHE_VERSION: i64 = 5;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Record {
     pub provider: Source,
@@ -31,6 +31,9 @@ pub struct Record {
     pub output_tokens: u64,
     pub reasoning_tokens: u64,
     pub timing_source: String,
+    /// Codex `service_tier` in force for the request; `None` when not logged.
+    #[serde(default)]
+    pub speed_mode: Option<String>,
 }
 impl Record {
     pub fn duration(&self, max_gap: f64) -> Option<f64> {

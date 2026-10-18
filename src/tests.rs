@@ -62,6 +62,7 @@ fn report_fixture() -> Vec<Record> {
         output_tokens,
         reasoning_tokens: 50,
         timing_source: "synthetic".into(),
+        speed_mode: None,
     })
     .collect()
 }
@@ -230,6 +231,40 @@ fn codex_mirrors_and_tools() {
     assert_eq!(
         rows.iter().map(|r| r.duration(300.0)).collect::<Vec<_>>(),
         vec![Some(10.0), Some(10.0)]
+    );
+}
+#[test]
+fn codex_speed_mode_follows_thread_settings() {
+    let usage = |t, id| {
+        codex(
+            t,
+            "token_usage_record",
+            json!({"thread_id":"s","response_id":id,"usage":{"output_tokens":10}}),
+        )
+    };
+    let settings = |t, tier| {
+        codex(
+            t,
+            "event_msg",
+            json!({"type":"thread_settings_applied","thread_settings":{"service_tier":tier}}),
+        )
+    };
+    let rows = fixture(
+        vec![
+            codex(0, "session_meta", json!({"id":"s"})),
+            usage(1, "before"),
+            settings(2, "priority"),
+            usage(3, "fast"),
+            settings(4, "default"),
+            usage(5, "normal"),
+        ],
+        "codex",
+    );
+    assert_eq!(
+        rows.iter()
+            .map(|r| r.speed_mode.as_deref())
+            .collect::<Vec<_>>(),
+        vec![None, Some("priority"), Some("default")]
     );
 }
 #[test]
@@ -475,6 +510,7 @@ fn demo_app() -> app::App {
                     output_tokens: (speed * 12.0) as u64,
                     reasoning_tokens: 80,
                     timing_source: "request-boundary".into(),
+                    speed_mode: (provider == "codex").then(|| "priority".into()),
                 });
             }
         }

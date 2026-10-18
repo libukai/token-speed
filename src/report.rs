@@ -115,6 +115,7 @@ pub(crate) fn write_report(
                         "Time",
                         "Provider",
                         "Model",
+                        "Mode",
                         "Output",
                         "Seconds",
                         "Est. tok/s",
@@ -127,6 +128,7 @@ pub(crate) fn write_report(
                                 clock.format(r.timestamp, "%Y-%m-%d %H:%M:%S"),
                                 r.provider.id().into(),
                                 r.model.clone(),
+                                r.speed_mode.clone().unwrap_or_else(|| "—".into()),
                                 ui::grouped(r.output_tokens),
                                 ui::rate(r.duration(args.max_gap)),
                                 ui::rate(r.rate(args.max_gap)),
@@ -163,7 +165,7 @@ pub(crate) fn write_report(
                     Some(cells)
                 };
                 let numeric = if recent {
-                    &[3, 4, 5][..]
+                    &[4, 5, 6][..]
                 } else {
                     &[3, 4, 5, 6, 7, 8, 9][..]
                 };

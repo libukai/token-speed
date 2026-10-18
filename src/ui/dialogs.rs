@@ -140,6 +140,10 @@ pub(super) fn record_detail(r: &Record, app: &App) -> Vec<Line<'static>> {
             rate(r.rate(app.args.max_gap))
         )),
         Line::raw(format!("Timing      {}", r.timing_source)),
+        Line::raw(format!(
+            "Speed mode  {}",
+            r.speed_mode.as_deref().unwrap_or("not logged")
+        )),
         Line::raw(format!("Session     {}", r.session)),
         Line::raw(format!("Response    {}", r.id)),
         Line::raw(""),
