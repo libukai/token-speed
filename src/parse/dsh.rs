@@ -84,7 +84,9 @@ fn record(session: &str, id: &str, p: &Value, end: f64, start: Option<f64>) -> R
         timestamp: end,
         start,
         // DSH reports cache reads separately from uncached input.
-        input_tokens: n(u, "inputTokens") + cached + written,
+        input_tokens: n(u, "inputTokens")
+            .saturating_add(cached)
+            .saturating_add(written),
         cached_tokens: cached,
         cache_write_tokens: written,
         // Reasoning is already part of output.

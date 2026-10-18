@@ -186,6 +186,10 @@ impl App {
         });
         self.args.refresh = false;
     }
+    #[cfg(test)]
+    pub fn loader(&self) -> Sender<Load> {
+        self.tx.clone()
+    }
     pub fn poll(&mut self) {
         while let Ok(event) = self.rx.try_recv() {
             match event {
@@ -197,8 +201,14 @@ impl App {
                         Ok((rows, meta)) => {
                             self.records = rows;
                             self.meta = meta;
+                            // New requests shift the rows; keep the same
+                            // request or model selected.
+                            let selected = self.selected_key();
                             if let Err(e) = self.rebuild() {
                                 self.error = Some(e.to_string());
+                            }
+                            if let Some(i) = selected.and_then(|k| self.position(&k)) {
+                                self.table.select(Some(i));
                             }
                         }
                         Err(e) => self.error = Some(format!("{e:#}")),
@@ -233,14 +243,16 @@ impl App {
             rows.retain(|r| {
                 r.model.to_lowercase().contains(&query)
                     || r.session.to_lowercase().contains(&query)
-                    || r.speed_mode.as_deref().is_some_and(|m| m.contains(&query))
+                    || r.speed_mode
+                        .as_deref()
+                        .is_some_and(|m| m.to_lowercase().contains(&query))
             });
         }
         let totals = data::summarize(&rows, self.args.max_gap);
         let sources = Source::ALL
             .map(|s| data::summarize(rows.iter().filter(|r| r.provider == s), self.args.max_gap));
         let mut models = data::aggregate(&rows, Group::Model, self.clock, self.args.max_gap);
-        models.sort_by(|a, b| b.output_tokens.cmp(&a.output_tokens));
+        models.sort_by_key(|m| std::cmp::Reverse(m.output_tokens));
         let (since, until) = data::bounds(&self.args, self.clock)?;
         let now = chrono::Utc::now().timestamp_millis() as f64 / 1000.0;
         let start = since.unwrap_or_else(|| rows.first().map_or(now - 86400.0, |r| r.timestamp));
@@ -326,6 +338,36 @@ impl App {
         match self.args.provider.0 {
             Some(s) => vec![s],
             None => self.visible_sources(),
+        }
+    }
+    /// Identity of the selected table row, stable across refreshes.
+    fn selected_key(&self) -> Option<(Source, String, String)> {
+        let i = self.table.selected()?;
+        match self.screen {
+            Screen::Requests => self.view.rows.iter().rev().nth(i).map(Record::key),
+            Screen::Models => self
+                .view
+                .models
+                .get(i)
+                .and_then(|m| Some((m.provider?, String::new(), m.model.clone()))),
+            _ => None,
+        }
+    }
+    fn position(&self, key: &(Source, String, String)) -> Option<usize> {
+        match self.screen {
+            Screen::Requests => self
+                .view
+                .rows
+                .iter()
+                .rev()
+                .take(self.row_count())
+                .position(|r| r.key() == *key),
+            Screen::Models => self
+                .view
+                .models
+                .iter()
+                .position(|m| m.provider == Some(key.0) && m.model == key.2),
+            _ => None,
         }
     }
     pub fn palette(&self) -> crate::ui::Palette {
@@ -465,7 +507,10 @@ impl App {
                 self.cursor = self.cursor.saturating_sub(1)
             }
             KeyCode::Right if self.screen == Screen::Timeline => {
-                self.cursor = (self.cursor + 1).min(self.view.bins.len().saturating_sub(1))
+                self.cursor = self
+                    .cursor
+                    .saturating_add(1)
+                    .min(self.view.bins.len().saturating_sub(1))
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 let n = self.row_count();
@@ -483,12 +528,11 @@ impl App {
                 let n = self.row_count();
                 self.table.select(n.checked_sub(1));
             }
-            KeyCode::Enter => {
+            KeyCode::Enter
                 if self.screen == Screen::Timeline
-                    || (self.screen != Screen::Overview && self.table.selected().is_some())
-                {
-                    self.detail = true;
-                }
+                    || (self.screen != Screen::Overview && self.table.selected().is_some()) =>
+            {
+                self.detail = true;
             }
             _ => {}
         }
@@ -535,7 +579,18 @@ pub enum Handled {
     Ignored,
 }
 impl App {
+    /// Handle one terminal event. A failed action (say, a time range that
+    /// cannot be resolved) is shown in the status line; it does not quit.
     pub fn event(&mut self, event: Event) -> Result<Handled> {
+        match self.handle(event) {
+            Err(e) => {
+                self.error = Some(format!("{e:#}"));
+                Ok(Handled::Changed)
+            }
+            handled => handled,
+        }
+    }
+    fn handle(&mut self, event: Event) -> Result<Handled> {
         use crossterm::event::{MouseButton, MouseEventKind};
         let code = match event {
             Event::Key(key) => {

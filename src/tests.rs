@@ -1,6 +1,6 @@
 use super::*;
 use chrono::{TimeZone, Utc};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use data::Record;
 use ratatui::{Terminal, backend::TestBackend, style::Color};
 use serde_json::Value;
@@ -1444,4 +1444,182 @@ fn hidden_source_stays_out_of_every_view_unless_asked_for() {
     app.records.extend(rows);
     app.rebuild().unwrap();
     assert!(!app.visible_sources().contains(&Source::Other));
+}
+
+#[test]
+fn magpie_calls_without_an_id_stay_distinct() {
+    let dir = tempfile::tempdir().unwrap();
+    // Two parallel calls with numeric start times and no response id.
+    let line = |out: u64| {
+        json!({"agent": "pi", "t": 1791417600000u64, "ms": 1000, "in": 10, "out": out}).to_string()
+    };
+    fs::write(
+        dir.path().join("usage.jsonl"),
+        [line(5), line(7)].join("\n") + "\n",
+    )
+    .unwrap();
+    let (rows, bad) = Source::Other
+        .parse(&dir.path().join("usage.jsonl"))
+        .unwrap();
+    assert_eq!(bad, 0);
+    assert_eq!(rows.iter().map(|r| r.output_tokens).sum::<u64>(), 12);
+}
+
+#[test]
+fn magpie_never_replaces_or_hides_the_agents_own_record() {
+    let dir = tempfile::tempdir().unwrap();
+    let codex_dir = dir.path().join("codex/sessions");
+    fs::create_dir_all(&codex_dir).unwrap();
+    let usage = json!({"input_tokens": 1000, "cached_input_tokens": 0, "output_tokens": 400});
+    let codex_log = [
+        codex(0, "session_meta", json!({"id": "S"})),
+        codex(1, "event_msg", json!({"type": "task_started"})),
+        codex(
+            21,
+            "token_usage_record",
+            json!({"response_id": "R", "usage": usage}),
+        ),
+    ]
+    .map(|v| v.to_string())
+    .join("\n");
+    fs::write(codex_dir.join("rollout-s.jsonl"), codex_log + "\n").unwrap();
+    let ledger = [
+        // The same call seen by the gateway, sharing its response id and
+        // stamped a little later: the agent's record must win.
+        magpie_line(
+            "codex",
+            "2026-10-08T00:00:01Z",
+            21000,
+            json!({"response_id": "R", "native_session": "S", "out": 999}),
+        ),
+        // A gateway-only call in the same session an hour later, after a
+        // native record whose start is stale: it must survive.
+        magpie_line(
+            "codex",
+            "2026-10-08T01:00:00Z",
+            2000,
+            json!({"response_id": "G", "native_session": "S"}),
+        ),
+    ]
+    .join("\n");
+    fs::write(dir.path().join("usage.jsonl"), ledger + "\n").unwrap();
+    let late = dir.path().join("codex/sessions/rollout-late.jsonl");
+    let stale = [
+        codex(0, "session_meta", json!({"id": "S"})),
+        // Started 2026-10-08T00:00:00, reported at 02:00: far beyond max-gap.
+        codex(0, "event_msg", json!({"type": "task_started"})),
+        json!({"timestamp": "2026-10-08T02:00:00Z", "type": "token_usage_record",
+            "payload": {"response_id": "L", "usage": usage}}),
+    ]
+    .map(|v| v.to_string())
+    .join("\n");
+    fs::write(late, stale + "\n").unwrap();
+    let mut args = Args::parse_from(["token-speed", "--all-time"]);
+    args.codex_dir = vec![dir.path().join("codex")];
+    args.claude_dir = vec![dir.path().join("none")];
+    args.dsh_dir = vec![dir.path().join("none")];
+    args.magpie_dir = vec![dir.path().into()];
+    args.cache = dir.path().join("index.sqlite3");
+    let (rows, _) = data::collect(&args, |_, _| {}).unwrap();
+    let r = rows.iter().find(|r| r.id == "R").unwrap();
+    assert_eq!(
+        (r.output_tokens, r.timing_source.as_str()),
+        (400, "request-boundary")
+    );
+    assert!(rows.iter().any(|r| r.id == "G"), "gateway-only call kept");
+    assert_eq!(rows.len(), 3);
+}
+
+#[test]
+fn claude_resumed_session_counts_copied_messages_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let projects = dir.path().join("claude/projects/p");
+    fs::create_dir_all(&projects).unwrap();
+    let assistant = |sid: &str, mid: &str| {
+        json!({"type":"assistant","uuid":format!("{sid}-{mid}"),"sessionId":sid,"timestamp":"2026-10-08T00:00:05Z","message":{"id":mid,"model":"claude-test","usage":{"input_tokens":10,"output_tokens":100}}}).to_string()
+    };
+    fs::write(
+        projects.join("first.jsonl"),
+        assistant("first", "m1") + "\n",
+    )
+    .unwrap();
+    // Resuming copies m1 into the new session's file before m2.
+    let resumed = [assistant("second", "m1"), assistant("second", "m2")].join("\n");
+    fs::write(projects.join("second.jsonl"), resumed + "\n").unwrap();
+    let mut args = Args::parse_from(["token-speed", "--all-time"]);
+    args.codex_dir = vec![dir.path().join("none")];
+    args.claude_dir = vec![dir.path().join("claude")];
+    args.dsh_dir = vec![dir.path().join("none")];
+    args.magpie_dir = vec![dir.path().join("none")];
+    args.cache = dir.path().join("index.sqlite3");
+    let (rows, _) = data::collect(&args, |_, _| {}).unwrap();
+    assert_eq!(rows.iter().map(|r| r.output_tokens).sum::<u64>(), 200);
+}
+
+#[test]
+fn a_day_whose_midnight_is_skipped_starts_after_the_gap() {
+    // Chile springs forward at local midnight on 2026-09-06.
+    let clock = Clock::new(Some("America/Santiago")).unwrap();
+    let start = clock.boundary("2026-09-06", false).unwrap();
+    assert_eq!(clock.format(start, "%Y-%m-%d %H:%M"), "2026-09-06 01:00");
+    let end = clock.boundary("2026-09-05", true).unwrap();
+    assert_eq!(end, start);
+    // A clock time inside the gap still needs an explicit offset.
+    assert!(clock.boundary("2026-09-06T00:30", false).is_err());
+}
+
+#[test]
+fn failed_actions_are_reported_without_quitting() {
+    let mut app = demo_app();
+    // An unresolvable range makes the rebuild fail.
+    app.args.until = Some("2026-13-40".into());
+    let handled = app
+        .event(Event::Key(KeyEvent::new(
+            KeyCode::Char('1'),
+            KeyModifiers::NONE,
+        )))
+        .unwrap();
+    assert!(matches!(handled, app::Handled::Changed));
+    assert!(app.error.is_some());
+}
+
+#[test]
+fn timeline_keys_before_the_first_index_do_not_overflow() {
+    let mut args = Args::parse_from(["token-speed", "--view", "timeline"]);
+    args.magpie_dir = vec!["/nonexistent/magpie".into()];
+    let mut app = app::App::new(args, Clock::new(Some("UTC")).unwrap());
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Left);
+}
+
+#[test]
+fn request_selection_follows_the_request_across_refreshes() {
+    let mut app = demo_app();
+    app.set_screen(args::Screen::Requests);
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Down);
+    let before = app.view.rows.iter().rev().nth(2).unwrap().id.clone();
+    // A refresh brings in a newer request, which lists first.
+    let mut rows = app.records.clone();
+    let mut newer = rows.last().unwrap().clone();
+    newer.id = "newest".into();
+    newer.timestamp += 1.0;
+    rows.push(newer);
+    app.loading = true;
+    app.loader()
+        .send(app::Load::Done(Ok((rows, data::Metadata::default()))))
+        .unwrap();
+    app.poll();
+    let i = app.table.selected().unwrap();
+    assert_eq!(app.view.rows.iter().rev().nth(i).unwrap().id, before);
+}
+
+#[test]
+fn csv_cells_cannot_become_spreadsheet_formulas() {
+    let mut rows = report_fixture();
+    rows[0].model = "=HYPERLINK(\"x\")".into();
+    let args = Args::parse_from(["token-speed", "recent", "--format", "csv", "--all-time"]);
+    let csv = render_report(&args, &rows);
+    assert!(csv.contains("'=HYPERLINK"));
+    assert!(!csv.contains(",=HYPERLINK"));
 }

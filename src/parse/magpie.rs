@@ -19,19 +19,19 @@ pub const NO_SESSION: &str = "magpie";
 
 pub fn parse(path: &Path) -> Result<Parsed> {
     let mut rows = Vec::new();
-    let malformed = json_lines(path, |_, d| rows.extend(record(&d)))?;
+    let malformed = json_lines(path, |index, d| rows.extend(record(index, &d)))?;
     Ok((finish(rows), malformed))
 }
 
-fn record(d: &Value) -> Option<Record> {
+fn record(index: usize, d: &Value) -> Option<Record> {
     let start = stamp(&d["t"])?;
     let cached = n(d, "cache_read");
     let written = n(d, "cache_write");
     // Gateway input excludes cache; the other sources count it in.
-    let input = n(d, "in") + cached + written;
+    let input = n(d, "in").saturating_add(cached).saturating_add(written);
     let output = n(d, "out");
     // Rejected or cancelled calls carry no usage.
-    if input + output == 0 {
+    if input == 0 && output == 0 {
         return None;
     }
     let agent = text(&d["agent"]).unwrap_or("magpie");
@@ -43,10 +43,11 @@ fn record(d: &Value) -> Option<Record> {
         (_, Some(s)) => s.into(),
         (_, None) => NO_SESSION.into(),
     };
+    // Without a call id, the line is the call: the ledger is append-only and
+    // holds each call once.
     let id = text(&d["response_id"])
         .or_else(|| text(&d["rid"]))
-        .map(String::from)
-        .unwrap_or_else(|| format!("{agent}-{}", text(&d["t"]).unwrap_or_default()));
+        .map_or_else(|| format!("line-{index}"), String::from);
     let seconds = n(d, "ms") as f64 / 1000.0;
     Some(Record {
         provider,

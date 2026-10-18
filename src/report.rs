@@ -88,7 +88,13 @@ pub(crate) fn write_report(
                     writer.write_record(columns.iter().map(|c| {
                         let v = &row[c];
                         if let Some(s) = v.as_str() {
-                            s.into()
+                            // Spreadsheets run cells that start like a formula;
+                            // log metadata must stay plain text.
+                            if s.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+                                format!("'{s}")
+                            } else {
+                                s.into()
+                            }
                         } else if v.is_null() {
                             String::new()
                         } else {

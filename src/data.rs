@@ -16,7 +16,7 @@ use std::{
 };
 use walkdir::WalkDir;
 
-const CACHE_VERSION: i64 = 6;
+const CACHE_VERSION: i64 = 7;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Record {
     pub provider: Source,
@@ -31,7 +31,7 @@ pub struct Record {
     pub output_tokens: u64,
     pub reasoning_tokens: u64,
     pub timing_source: String,
-    /// Codex `service_tier` in force for the request; `None` when not logged.
+    /// Codex `service_tier` or Claude `usage.speed`; `None` when not logged.
     #[serde(default)]
     pub speed_mode: Option<String>,
 }
@@ -43,8 +43,15 @@ impl Record {
     pub fn rate(&self, max_gap: f64) -> Option<f64> {
         Some(self.output_tokens as f64 / self.duration(max_gap)?)
     }
+    /// Identity of one call. Claude message ids are global, and a resumed
+    /// session copies earlier messages into its new file, so Claude calls
+    /// are keyed by message alone.
     pub fn key(&self) -> (Source, String, String) {
-        (self.provider, self.session.clone(), self.id.clone())
+        let session = match self.provider {
+            Source::Claude => String::new(),
+            _ => self.session.clone(),
+        };
+        (self.provider, session, self.id.clone())
     }
 }
 #[derive(Clone, Debug, Default, Serialize)]
@@ -58,13 +65,17 @@ pub fn collect(
     args: &Args,
     mut progress: impl FnMut(usize, usize),
 ) -> Result<(Vec<Record>, Metadata)> {
+    use crate::parse::magpie::GATEWAY;
     if let Some(parent) = args.cache.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent)?;
     }
     let mut db = Connection::open(&args.cache)?;
     db.busy_timeout(std::time::Duration::from_secs(5))?;
+    // Readers never wait for a writer in WAL mode. Lookups run outside any
+    // transaction and freshly parsed files are stored in short batches, so a
+    // cold index never holds the write lock for long.
+    db.pragma_update(None, "journal_mode", "WAL")?;
     db.execute_batch("CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, provider TEXT, size INTEGER, mtime INTEGER, version INTEGER, rows TEXT, malformed INTEGER);")?;
-    let mut tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let roots = Source::ALL
         .into_iter()
         // The gateway ledger files calls under the agents that made them, so
@@ -78,6 +89,7 @@ pub fn collect(
     let mut meta = Metadata::default();
     let mut result = HashMap::new();
     let mut paths = HashSet::new();
+    let mut pending = Vec::new();
     for (source, root) in roots {
         let provider = source.id();
         if !root.exists() {
@@ -101,13 +113,26 @@ pub fn collect(
             if !entry.file_type().is_file() || !(source.spec().is_log)(&name) {
                 continue;
             }
-            let absolute = path.canonicalize()?;
+            // A file can vanish or move mid-walk (Codex archives sessions);
+            // skip it with a warning rather than fail the whole pass.
+            let (absolute, stat) = match path.canonicalize().and_then(|a| Ok((a, path.metadata()?)))
+            {
+                Ok(v) => v,
+                Err(e) => {
+                    meta.warnings.push(format!("{}: {e}", path.display()));
+                    continue;
+                }
+            };
             if !paths.insert(absolute.clone()) {
                 continue;
             }
-            let stat = path.metadata()?;
-            let mtime = stat.modified()?.duration_since(UNIX_EPOCH)?.as_nanos() as i64;
-            let saved:Option<(i64,i64,i64,String,usize)>=tx.query_row("SELECT size,mtime,version,rows,malformed FROM files WHERE path=? AND provider=?",params![absolute.to_string_lossy(),provider],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get::<_,i64>(4)? as usize))).optional()?;
+            let key = absolute.to_string_lossy().into_owned();
+            let mtime = stat
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_nanos() as i64);
+            let saved:Option<(i64,i64,i64,String,usize)>=db.query_row("SELECT size,mtime,version,rows,malformed FROM files WHERE path=? AND provider=?",params![key,provider],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get::<_,i64>(4)? as usize))).optional()?;
             let cached = saved.filter(|s| {
                 !args.refresh && (s.0, s.1, s.2) == (stat.len() as i64, mtime, CACHE_VERSION)
             });
@@ -127,18 +152,17 @@ pub fn collect(
                         continue;
                     }
                 };
-                tx.execute(
-                    "INSERT OR REPLACE INTO files VALUES (?,?,?,?,?,?,?)",
-                    params![
-                        absolute.to_string_lossy(),
-                        provider,
-                        stat.len() as i64,
-                        mtime,
-                        CACHE_VERSION,
-                        serde_json::to_string(&rows)?,
-                        bad as i64
-                    ],
-                )?;
+                pending.push((
+                    key,
+                    provider,
+                    stat.len() as i64,
+                    mtime,
+                    serde_json::to_string(&rows)?,
+                    bad as i64,
+                ));
+                if pending.len() >= 16 {
+                    store(&mut db, &mut pending)?;
+                }
                 meta.parsed_files += 1;
                 (rows, bad)
             };
@@ -150,45 +174,66 @@ pub fn collect(
             }
             for r in rows {
                 let k = r.key();
+                // The later record wins, but a gateway copy never replaces
+                // the agent's own.
+                let rank = |r: &Record| (r.timing_source != GATEWAY, r.timestamp);
                 if result
                     .get(&k)
-                    .is_none_or(|prev: &Record| r.timestamp > prev.timestamp)
+                    .is_none_or(|prev: &Record| rank(&r) > rank(prev))
                 {
                     result.insert(k, r);
                 }
             }
-            let count = meta.parsed_files + meta.cached_files;
-            if count % 64 == 0 {
+            if (meta.parsed_files + meta.cached_files) % 64 == 0 {
                 progress(meta.parsed_files, meta.cached_files);
-            }
-            if meta.parsed_files > 0 && meta.parsed_files % 64 == 0 && count % 64 == 0 {
-                tx.commit()?;
-                tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             }
         }
     }
-    tx.commit()?;
+    store(&mut db, &mut pending)?;
     progress(meta.parsed_files, meta.cached_files);
-    let mut rows = drop_mirrored(result.into_values().collect());
+    let mut rows = drop_mirrored(result.into_values().collect(), args.max_gap);
     rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
     Ok((rows, meta))
+}
+
+type Pending = (String, &'static str, i64, i64, String, i64);
+fn store(db: &mut Connection, pending: &mut Vec<Pending>) -> Result<()> {
+    if pending.is_empty() {
+        return Ok(());
+    }
+    let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    for (path, provider, size, mtime, rows, bad) in pending.drain(..) {
+        tx.execute(
+            "INSERT OR REPLACE INTO files VALUES (?,?,?,?,?,?,?)",
+            params![path, provider, size, mtime, CACHE_VERSION, rows, bad],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
 }
 
 /// Calls the gateway ledger shares with an agent's own log are counted once,
 /// from the agent's log. The two have no call id in common, so a ledger
 /// record is dropped when its completion falls within `SLACK` of a native
-/// request of the same agent: of the same session when the ledger names the
+/// request's span (its start, when usable under `max_gap`, to its end) of
+/// the same agent: of the same session when the ledger names the
 /// agent's own session (Codex, Claude), else of any session (DSH). The
 /// rest (an agent with no log, or the stretches where the log is missing)
 /// stay.
 const SLACK: f64 = 10.0;
-fn drop_mirrored(rows: Vec<Record>) -> Vec<Record> {
+fn drop_mirrored(rows: Vec<Record>, max_gap: f64) -> Vec<Record> {
     use crate::parse::magpie::{GATEWAY, NO_SESSION};
     type Spans = Vec<(f64, f64)>;
     let mut by_source: HashMap<Source, Spans> = HashMap::new();
     let mut by_session: HashMap<(Source, &str), Spans> = HashMap::new();
     for r in rows.iter().filter(|r| r.timing_source != GATEWAY) {
-        let span = (r.start.unwrap_or(r.timestamp) - SLACK, r.timestamp + SLACK);
+        // Only a plausible start widens the span; a stale or inverted one
+        // would hide unrelated gateway calls.
+        let start = r
+            .start
+            .filter(|s| r.timestamp - s > 0.0 && r.timestamp - s <= max_gap)
+            .unwrap_or(r.timestamp);
+        let span = (start - SLACK, r.timestamp + SLACK);
         by_source.entry(r.provider).or_default().push(span);
         by_session
             .entry((r.provider, r.session.as_str()))
@@ -269,12 +314,28 @@ impl Clock {
                 .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M"))
                 .context("Invalid ISO time")?
         };
-        let stamp = match self.0 {
+        // A calendar day starts at its first instant: where DST skips
+        // midnight, that is the end of the gap. Clock times inside a gap or
+        // overlap are ambiguous and need an explicit offset.
+        let first = |d: NaiveDateTime| match self.0 {
+            Some(tz) => tz.from_local_datetime(&d).earliest().map(|d| d.timestamp()),
+            None => Local
+                .from_local_datetime(&d)
+                .earliest()
+                .map(|d| d.timestamp()),
+        };
+        let exact = |d: NaiveDateTime| match self.0 {
             Some(tz) => tz.from_local_datetime(&d).single().map(|d| d.timestamp()),
             None => Local
                 .from_local_datetime(&d)
                 .single()
                 .map(|d| d.timestamp()),
+        };
+        let stamp = if s.len() == 10 {
+            // DST gaps are at most a few hours; step to the first valid minute.
+            (0..=24 * 60).find_map(|m| first(d + Duration::minutes(m)))
+        } else {
+            exact(d)
         };
         stamp
             .map(|t| t as f64)
@@ -347,15 +408,15 @@ pub fn summarize(
     for r in rows {
         let r = r.borrow();
         s.requests += 1;
-        s.input_tokens += r.input_tokens;
-        s.cached_tokens += r.cached_tokens;
-        s.cache_write_tokens += r.cache_write_tokens;
-        s.output_tokens += r.output_tokens;
-        s.reasoning_tokens += r.reasoning_tokens;
+        s.input_tokens = s.input_tokens.saturating_add(r.input_tokens);
+        s.cached_tokens = s.cached_tokens.saturating_add(r.cached_tokens);
+        s.cache_write_tokens = s.cache_write_tokens.saturating_add(r.cache_write_tokens);
+        s.output_tokens = s.output_tokens.saturating_add(r.output_tokens);
+        s.reasoning_tokens = s.reasoning_tokens.saturating_add(r.reasoning_tokens);
         if let Some(d) = r.duration(max_gap) {
             s.timed_requests += 1;
             s.seconds += d;
-            s.timed_output_tokens += r.output_tokens;
+            s.timed_output_tokens = s.timed_output_tokens.saturating_add(r.output_tokens);
             rates.push(r.output_tokens as f64 / d);
         }
     }

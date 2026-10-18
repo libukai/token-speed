@@ -72,7 +72,7 @@ impl Screen {
 #[derive(Parser, Clone, Debug)]
 #[command(
     version,
-    about = "Local token throughput observatory for coding agents (Codex, Claude Code, DSH)",
+    about = "Local token throughput observatory for coding agents (Codex, Claude Code, DSH, Magpie)",
     after_help = "Run token-speed with no arguments for the TUI, --table for a text report, or --json for JSON. Use summary/recent for scriptable reports."
 )]
 pub struct Args {
@@ -127,7 +127,11 @@ pub struct Args {
     pub limit: usize,
     #[arg(long, default_value_t = 300.0)]
     pub max_gap: f64,
-    #[arg(long, default_value_t = 5.0)]
+    #[arg(
+        long,
+        default_value_t = 5.0,
+        help = "TUI refresh period in seconds; at least 1"
+    )]
     pub interval: f64,
     #[arg(long, default_values_os_t = [Source::Codex.default_dir()], help = "Codex home (CODEX_HOME); repeatable")]
     pub codex_dir: Vec<PathBuf>,

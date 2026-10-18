@@ -30,7 +30,9 @@ fn record(session: &str, id: &str, model: &str, end: f64, u: &Value) -> Record {
         model: model.into(),
         timestamp: end,
         start: None,
-        input_tokens: n(u, "input_tokens") + cached + written,
+        input_tokens: n(u, "input_tokens")
+            .saturating_add(cached)
+            .saturating_add(written),
         cached_tokens: cached,
         cache_write_tokens: written,
         output_tokens: n(u, "output_tokens"),
@@ -73,7 +75,7 @@ pub fn parse(path: &Path) -> Result<Parsed> {
         {
             return;
         }
-        let fallback = format!("line-{index}");
+        let fallback = format!("{sid}/line-{index}");
         let mid = text(&d["message"]["id"])
             .or_else(|| text(&d["requestId"]))
             .or_else(|| text(&d["uuid"]))

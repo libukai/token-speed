@@ -33,15 +33,19 @@ fn entry() -> Result<()> {
         || !args.max_gap.is_finite()
         || args.max_gap <= 0.0
         || !args.interval.is_finite()
-        || args.interval <= 0.0
+        || args.interval < 1.0
     {
-        bail!("days, limit, max-gap and interval must be finite and positive");
+        bail!("days, limit and max-gap must be finite and positive; interval at least 1 second");
     }
-    let clock = Clock::new(
-        args.timezone
-            .as_deref()
-            .or(std::env::var("TZ").ok().as_deref()),
-    )?;
+    // --timezone must name an IANA zone. TZ is only a hint: POSIX forms such
+    // as `:/etc/localtime` or `JST-9` fall back to the system zone.
+    let clock = match &args.timezone {
+        Some(name) => Clock::new(Some(name))?,
+        None => std::env::var("TZ")
+            .ok()
+            .and_then(|tz| Clock::new(Some(tz.trim_start_matches(':'))).ok())
+            .unwrap_or(Clock(None)),
+    };
     data::bounds(&args, clock)?;
     if args.uses_tui() && io::stdout().is_terminal() && io::stdin().is_terminal() {
         let shutdown = Arc::new(AtomicBool::new(false));
