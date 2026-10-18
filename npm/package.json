@@ -1,14 +1,14 @@
 {
   "name": "token-speed",
   "version": "0.3.1",
-  "description": "A terminal observatory for Codex and Claude token throughput",
+  "description": "A terminal observatory for Codex, Claude Code, DSH and Magpie token throughput",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/william1010121/token-speed.git"
+    "url": "git+https://github.com/libukai/token-speed.git"
   },
-  "homepage": "https://github.com/william1010121/token-speed#readme",
-  "bugs": "https://github.com/william1010121/token-speed/issues",
+  "homepage": "https://github.com/libukai/token-speed#readme",
+  "bugs": "https://github.com/libukai/token-speed/issues",
   "keywords": ["codex", "claude", "tui", "tokens", "cli"],
   "bin": { "token-speed": "bin/token-speed.cjs" },
   "files": ["bin/", "vendor/", "check-package.cjs", "README.md", "LICENSE"],

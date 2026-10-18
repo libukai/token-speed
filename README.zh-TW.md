@@ -2,9 +2,9 @@
 
 [English](README.md) · **繁體中文**
 
-[![npm](https://img.shields.io/npm/v/token-speed?logo=npm&color=cb3837)](https://www.npmjs.com/package/token-speed)
-
 Rust + [Ratatui](https://ratatui.rs/) 打造的 Codex／Claude token 速度 TUI。四個 view、深色介面、大字速度摘要、薄荷綠／琥珀色曲線、模型分布圖與 token 活動圖。讀取本機紀錄，不發送模型 API 請求。
+
+本專案 fork 自 [william1010121/token-speed](https://github.com/william1010121/token-speed)（MIT），在其上新增 DSH 與 Magpie gateway 資料來源。
 
 ![TUI preview](docs/preview.png)
 
@@ -12,30 +12,16 @@ Rust + [Ratatui](https://ratatui.rs/) 打造的 Codex／Claude token 速度 TUI�
 
 ## 安裝
 
-### npm（macOS／Linux）
+此 fork 尚未發布到 npm 或 crates.io，也還沒有預編譯 release；npm 上的 `token-speed` 是[上游](https://github.com/william1010121/token-speed)專案，不含 DSH 與 Magpie 來源。請從原始碼安裝：
 
 ```sh
-npm install -g token-speed
+cargo install --git https://github.com/libukai/token-speed --locked
 token-speed --today
 ```
 
-需要 Node.js 18 以上。套件內附 macOS Apple Silicon／Intel 與 Linux ARM64／x86-64 原生執行檔，不需要 Rust，也沒有安裝腳本。Linux 需要 glibc 2.35 以上；目前不支援 Windows 或 Alpine 等 musl 系統。
+需要 Rust 1.92 以上與 C 編譯器；SQLite 已內含。預設安裝到 `~/.cargo/bin`，請確認已加入 `PATH`。macOS 若遇到自訂編譯器封裝造成的 SDK／linker 錯誤，可設定 `CC=/usr/bin/clang` 與 `CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=/usr/bin/clang`；Intel 對應 `CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER`。
 
-直接試用：`npx --yes token-speed --today`。更新：`npm install -g token-speed@latest`。
-
-### Cargo（從指定 release 編譯）
-
-需要 Rust 1.92 以上與 C 編譯器；SQLite 已內含，不必手動 clone：
-
-```sh
-cargo install --git https://github.com/william1010121/token-speed \
-  --tag v0.3.1 --locked
-token-speed --today
-```
-
-預設安裝到 `~/.cargo/bin`，請確認已加入 `PATH`。此指令直接使用 Git，不依賴 crates.io 發布；更新時改用新版 release tag 重跑即可。macOS 若遇到自訂編譯器封裝造成的 SDK／linker 錯誤，可設定 `CC=/usr/bin/clang` 與 `CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=/usr/bin/clang`；Intel 對應 `CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER`。
-
-也可以從 [Releases](https://github.com/william1010121/token-speed/releases/latest) 下載預編譯執行檔。
+只需要 Codex 與 Claude Code 的話，也可以直接用上游的 npm 套件與預編譯執行檔：`npm install -g token-speed`。
 
 ## 使用
 
@@ -145,12 +131,12 @@ TUI 的最近回覆列表保留最近 200 筆，`--limit` 大於 200 時會增�
 ## 安裝／開發
 
 ```sh
-git clone https://github.com/william1010121/token-speed.git
+git clone https://github.com/libukai/token-speed.git
 cd token-speed
 ./install.sh
 ```
 
-編譯後安裝單一原生執行檔到 `~/.local/bin/token-speed`，執行不需要 Python。可用 `TOKEN_SPEED_INSTALL_DIR` 指定安裝目錄。需要 Rust 1.92 以上及 C 編譯器。也可以從 [Releases](https://github.com/william1010121/token-speed/releases/latest) 下載 macOS／Linux 的預編譯執行檔。
+編譯後安裝單一原生執行檔到 `~/.local/bin/token-speed`，執行不需要 Python。可用 `TOKEN_SPEED_INSTALL_DIR` 指定安裝目錄。需要 Rust 1.92 以上及 C 編譯器。
 
 ```sh
 cargo test --locked

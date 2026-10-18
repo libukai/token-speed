@@ -5,11 +5,11 @@ edition = "2024"
 rust-version = "1.92"
 license = "MIT"
 readme = "README.md"
-repository = "https://github.com/william1010121/token-speed"
-homepage = "https://github.com/william1010121/token-speed"
+repository = "https://github.com/libukai/token-speed"
+homepage = "https://github.com/libukai/token-speed"
 keywords = ["codex", "claude", "tui", "tokens", "cli"]
 categories = ["command-line-utilities", "development-tools"]
-description = "A terminal observatory for Codex and Claude token throughput"
+description = "A terminal observatory for Codex, Claude Code, DSH and Magpie token throughput"
 
 [[bin]]
 name = "token-speed"

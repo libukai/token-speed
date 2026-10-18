@@ -12,7 +12,7 @@ const targets = {
 };
 const target = targets[`${process.platform}-${process.arch}`];
 if (!target) {
-  console.error(`token-speed: unsupported platform ${process.platform}/${process.arch}. Build from source: https://github.com/william1010121/token-speed#quick-start`);
+  console.error(`token-speed: unsupported platform ${process.platform}/${process.arch}. Build from source: https://github.com/libukai/token-speed#quick-start`);
   process.exit(1);
 }
 

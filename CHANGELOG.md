@@ -8,6 +8,8 @@
 - Mouse: source, time-window and theme chips, table rows and chart buckets are clickable; clicks also close dialogs and keep a typed filter.
 - Fix: clicks lagged or missed after pointer movement. Only press / release / wheel reporting is enabled, and events that change nothing no longer trigger a redraw each.
 - DSH (DeepSeek Harness) source: reads `~/.dsh/sessions` zstd session logs, times each model step, and adds a fourth source to the TUI and reports.
+- Magpie gateway ledger (`~/.config/magpie/usage.jsonl`, `--magpie-dir`): calls are filed under the agent that made them, and the native log wins where both exist. Calls from agents without a parser go to a hidden `other` source (`--provider other`).
+- The live status moved from above the key legend to under the title.
 
 ## [0.3.1](https://github.com/william1010121/token-speed/releases/tag/v0.3.1) — 2026-10-08
 

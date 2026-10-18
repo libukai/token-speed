@@ -4,7 +4,7 @@ This repository includes `AGENTS.md` with project-specific **Code Review Rules**
 
 ## Repository settings
 
-Configured for `william1010121/token-speed`:
+Upstream (`william1010121/token-speed`) is configured as follows; this fork has not set up automatic review yet:
 
 | Setting | Value |
 | --- | --- |
@@ -20,7 +20,7 @@ These settings are stored in the connected Codex account, while the rules and th
 
 Automatic reviews are an account / repository setting in Codex, not a switch in a committed TOML file:
 
-1. Connect `william1010121/token-speed` to Codex, granting the GitHub integration access to this repository.
+1. Connect the repository to Codex, granting the GitHub integration access to this repository.
 2. Open [Codex code review settings](https://chatgpt.com/settings/code-review), select this repository, and enable automatic review for all pull requests.
 3. Set the review trigger to **On every push** so follow-up changes receive fresh review.
 

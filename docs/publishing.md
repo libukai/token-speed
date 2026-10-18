@@ -1,5 +1,7 @@
 # Publishing npm packages
 
+> This describes the upstream project's release process. This fork has no npm package or prebuilt release yet, and the `token-speed` name on npm belongs to upstream: publish under a different package name, or not at all.
+
 Cargo users can install a tagged release directly from Git. The npm package ships the four native binaries from that same GitHub release, plus a small Node launcher. It has no runtime dependencies or install scripts; installation does not fetch binaries from GitHub. Linux needs glibc 2.35 or newer; Windows and musl are not supported.
 
 The native TUI handles SIGINT, SIGTERM and SIGHUP by exiting its event loop normally, allowing its terminal guard to restore raw mode, mouse capture and the alternate screen. The npm launcher forwards these signals to the child. Native signal tests use Python's standard-library PTY support and empty synthetic log directories.

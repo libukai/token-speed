@@ -4,12 +4,11 @@
 
 **Your coding agents, at a glance.**
 
-A terminal observatory for Codex, Claude Code and DSH (DeepSeek Harness).<br>
-Four views. Local logs. One native Rust binary.
+A terminal observatory for Codex, Claude Code and DSH (DeepSeek Harness), plus any agent behind a Magpie gateway.<br>
+Four views. Local logs. One native Rust binary.<br>
+<sub>A fork of [william1010121/token-speed](https://github.com/william1010121/token-speed) with DSH and Magpie gateway sources.</sub>
 
-[![CI](https://github.com/william1010121/token-speed/actions/workflows/ci.yml/badge.svg)](https://github.com/william1010121/token-speed/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/william1010121/token-speed?color=55dfbd)](https://github.com/william1010121/token-speed/releases/latest)
-[![npm](https://img.shields.io/npm/v/token-speed?logo=npm&color=cb3837)](https://www.npmjs.com/package/token-speed)
+[![CI](https://github.com/libukai/token-speed/actions/workflows/ci.yml/badge.svg)](https://github.com/libukai/token-speed/actions/workflows/ci.yml)
 [![Rust](https://img.shields.io/badge/Rust-1.92%2B-dea584?logo=rust)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-74b9ff)](LICENSE)
 
@@ -36,62 +35,23 @@ You already have usage logs. See when your agents were active, which models were
 
 ## Quick start
 
-### npm · macOS / Linux
+This fork is not published to npm or crates.io, and it has no prebuilt release yet: the `token-speed` package on npm is the [upstream](https://github.com/william1010121/token-speed) project, without the DSH and Magpie sources. Build this fork from source:
 
 ```bash
-npm install -g token-speed
+cargo install --git https://github.com/libukai/token-speed --locked
 token-speed --today
 ```
 
-Requires Node.js 18+. The package includes native binaries for Apple Silicon / Intel macOS and ARM64 / x86-64 Linux. No Rust compiler or install scripts are needed. Linux requires glibc 2.35+; Windows and musl-based distributions such as Alpine are not supported by the prebuilt package.
+Requires **Rust 1.92+** and a C compiler. SQLite is bundled. Cargo installs to `~/.cargo/bin` by default; ensure it is on your `PATH`. On macOS, if a custom compiler wrapper causes SDK/linker errors, set `CC=/usr/bin/clang` and `CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=/usr/bin/clang` (Intel: `CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER`).
 
-Try without a global install: `npx --yes token-speed --today`. Update with `npm install -g token-speed@latest`.
-
-### Cargo · build from a tagged release
-
-Requires **Rust 1.92+** and a C compiler. SQLite is bundled. No manual clone is needed:
-
-```bash
-cargo install --git https://github.com/william1010121/token-speed \
-  --tag v0.3.1 --locked
-token-speed --today
-```
-
-Cargo installs to `~/.cargo/bin` by default; ensure it is on your `PATH`. This uses Git directly and does not require a crates.io package. To update, rerun with a newer release tag. On macOS, if a custom compiler wrapper causes SDK/linker errors, set `CC=/usr/bin/clang` and `CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=/usr/bin/clang` (Intel: `CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER`).
-
-### Prebuilt binary · macOS / Linux
-
-Download the matching archive from [the latest release](https://github.com/william1010121/token-speed/releases/latest), or use GitHub CLI:
-
-```bash
-# macOS Apple Silicon; see the table below for other platforms
-asset=token-speed-v0.3.1-aarch64-apple-darwin.tar.gz
-gh release download v0.3.1 --repo william1010121/token-speed \
-  --pattern "$asset" --pattern SHA256SUMS
-
-# Verify before extracting. Linux: sha256sum --ignore-missing -c SHA256SUMS
-shasum -a 256 -c SHA256SUMS --ignore-missing
-tar -xzf "$asset"
-mkdir -p "$HOME/.local/bin"
-install -m 755 token-speed "$HOME/.local/bin/token-speed"
-token-speed --today
-```
-
-| Platform | Archive suffix |
-| --- | --- |
-| macOS · Apple Silicon | `aarch64-apple-darwin.tar.gz` |
-| macOS · Intel | `x86_64-apple-darwin.tar.gz` |
-| Linux · x86-64 | `x86_64-unknown-linux-gnu.tar.gz` |
-| Linux · ARM64 | `aarch64-unknown-linux-gnu.tar.gz` |
-
-Linux binaries target Ubuntu 22.04 / glibc 2.35 or newer. For older distributions or other platforms, build from source. Windows releases are not currently provided.
+If you only need Codex and Claude Code, the upstream npm package and prebuilt binaries work: `npm install -g token-speed`.
 
 ### Build from source
 
 Requires **Rust 1.92+** and a C compiler. SQLite is bundled.
 
 ```bash
-git clone https://github.com/william1010121/token-speed.git
+git clone https://github.com/libukai/token-speed.git
 cd token-speed
 ./install.sh
 token-speed --today
@@ -193,7 +153,7 @@ Text tables have borders, right-aligned numeric columns and, for summaries, a to
 
 | Option | Purpose |
 | --- | --- |
-| `--provider all\|codex\|claude\|dsh` | Choose source |
+| `--provider all\|codex\|claude\|dsh\|magpie` | Choose source |
 | `--model`, `--session` | Substring filters |
 | `--today`, `--days N`, `--all-time`, `--since`, `--until` | Time range |
 | `--timezone` | IANA timezone; defaults to `TZ` or local timezone |
@@ -202,7 +162,7 @@ Text tables have borders, right-aligned numeric columns and, for summaries, a to
 | `--table`, `--json` | One-shot text table or JSON report; bypass the TUI |
 | `--group hour\|day\|model`, `--format table\|json\|csv` | Report grouping and format |
 | `--max-gap SECONDS` | Maximum usable timing interval; default 300 |
-| `--codex-dir`, `--claude-dir`, `--dsh-dir`, `--cache` | Override source / index locations |
+| `--codex-dir`, `--claude-dir`, `--dsh-dir`, `--magpie-dir`, `--cache` | Override source / index locations |
 | `--refresh` | Rebuild cached entries |
 
 ## Your logs stay on your machine
@@ -212,6 +172,7 @@ Text tables have borders, right-aligned numeric columns and, for summaries, a to
 | Codex | `~/.codex/{sessions,archived_sessions}` | `CODEX_HOME` or `--codex-dir` |
 | Claude Code | `~/.claude/projects` | `CLAUDE_CONFIG_DIR` or `--claude-dir` |
 | DSH (DeepSeek Harness) | `~/.dsh/sessions` (`*.jsonl.zstd`) | `DSH_HOME` or `--dsh-dir` (repeatable) |
+| Magpie gateway (`agent` per call) | `~/.config/magpie/usage.jsonl` | `MAGPIE_HOME` or `--magpie-dir` (repeatable) |
 | SQLite index | `~/.cache/token-speed/index.sqlite3` | `XDG_CACHE_HOME` or `--cache` |
 
 The parser includes subagent logs and deduplicates supported usage records. The cache stores token counts, timestamps, model names, session identifiers and source paths. It does **not** store prompts or tool-output bodies. Reports can contain session identifiers and file paths; redact them before sharing.
@@ -223,6 +184,16 @@ The first run indexes your history. Later runs scan file metadata and reparse ch
 Run `cargo test --locked`, `cargo clippy --locked --all-targets -- -D warnings`, and `cargo fmt --check`. Use synthetic fixtures; never commit personal agent logs. [Contributing guide](CONTRIBUTING.md) · [Codex review setup](docs/codex-review.md) · [Changelog](CHANGELOG.md).
 
 Maintainers: [npm packaging and publishing](docs/publishing.md).
+
+## Upstream and credits
+
+This is a fork of **[william1010121/token-speed](https://github.com/william1010121/token-speed)** (MIT), which provides the Codex and Claude Code parsers, the four views, the SQLite index and the npm / Cargo packaging. This fork adds:
+
+- **DSH** (DeepSeek Harness) as a source, with per-step timing.
+- The **Magpie** gateway ledger as a source, so agents behind it are counted and gaps in their own logs are filled.
+- A source registry, dark / light themes and mouse support, Codex / Claude speed mode, and the live status line under the title.
+
+Changes that suit the upstream project are welcome there too. The original copyright notice is kept in [LICENSE](LICENSE).
 
 Built with [Ratatui](https://ratatui.rs/) and [Crossterm](https://github.com/crossterm-rs/crossterm). Independent community project; not affiliated with OpenAI or Anthropic.
 
