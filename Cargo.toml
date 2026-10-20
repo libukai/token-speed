@@ -9,7 +9,7 @@ repository = "https://github.com/libukai/token-speed"
 homepage = "https://github.com/libukai/token-speed"
 keywords = ["codex", "claude", "tui", "tokens", "cli"]
 categories = ["command-line-utilities", "development-tools"]
-description = "A terminal observatory for Codex, Claude Code, DSH and Magpie token throughput"
+description = "A terminal observatory for Codex, Claude Code, DeepSeek, WorkBuddy and Magpie token throughput"
 include = ["/src", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE", "/CHANGELOG.md"]
 
 [[bin]]

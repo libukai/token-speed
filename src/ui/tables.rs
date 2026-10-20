@@ -33,6 +33,15 @@ pub(super) fn records_table(f: &mut Frame, area: Rect, app: &mut App) {
         Span::styled("  ↑/↓ select · Enter to inspect ", style(pal.muted)),
     ]);
     let header_style = style(pal.muted).bg(pal.panel);
+    // Wide enough for the longest visible source id, never below the old 8.
+    let source_width = Constraint::Length(
+        app.visible_sources()
+            .iter()
+            .map(|s| s.id().len())
+            .max()
+            .unwrap_or(0)
+            .max("Source".len() + 2) as u16,
+    );
     let (headers, widths, rows): (Vec<&str>, Vec<Constraint>, Vec<Row<'static>>) =
         if app.screen != Screen::Requests {
             let rows = app.view.models.iter().map(|m| {
@@ -62,7 +71,7 @@ pub(super) fn records_table(f: &mut Frame, area: Rect, app: &mut App) {
                     "Timed",
                 ],
                 vec![
-                    Constraint::Length(8),
+                    source_width,
                     Constraint::Min(14),
                     count_column_width(
                         "Requests",
@@ -122,7 +131,7 @@ pub(super) fn records_table(f: &mut Frame, area: Rect, app: &mut App) {
                 ],
                 vec![
                     Constraint::Length(15),
-                    Constraint::Length(8),
+                    source_width,
                     // Sized to content (capped) so spare width goes to the
                     // trailing Session column, not between Model and Mode.
                     Constraint::Length(

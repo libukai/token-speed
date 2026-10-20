@@ -16,7 +16,7 @@ use std::{
 };
 use walkdir::WalkDir;
 
-const CACHE_VERSION: i64 = 7;
+const CACHE_VERSION: i64 = 8;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Record {
     pub provider: Source,
@@ -217,7 +217,7 @@ fn store(db: &mut Connection, pending: &mut Vec<Pending>) -> Result<()> {
 /// record is dropped when its completion falls within `SLACK` of a native
 /// request's span (its start, when usable under `max_gap`, to its end) of
 /// the same agent: of the same session when the ledger names the
-/// agent's own session (Codex, Claude), else of any session (DSH). The
+/// agent's own session (Codex, Claude), else of any session. The
 /// rest (an agent with no log, or the stretches where the log is missing)
 /// stay.
 const SLACK: f64 = 10.0;

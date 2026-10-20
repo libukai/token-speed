@@ -502,7 +502,8 @@ fn demo_app() -> app::App {
     // Synthetic: never depend on the machine's real log directories.
     args.codex_dir = vec!["/nonexistent/codex".into()];
     args.claude_dir = vec!["/nonexistent/claude".into()];
-    args.dsh_dir = vec!["/nonexistent/dsh".into()];
+    args.deepseek_dir = vec!["/nonexistent/deepseek".into()];
+    args.workbuddy_dir = vec!["/nonexistent/workbuddy".into()];
     args.magpie_dir = vec!["/nonexistent/magpie".into()];
     let clock = Clock::new(Some("UTC")).unwrap();
     let mut app = app::App::new(args, clock);
@@ -685,7 +686,7 @@ fn export_visual_preview() {
         .map(|r| {
             let hour: u32 = r.id[2..r.id.len() - 2].parse().unwrap();
             Record {
-                provider: Source::Dsh,
+                provider: Source::Deepseek,
                 session: "demo-dsh".into(),
                 id: format!("d-{hour}"),
                 model: "deepseek-v4.1-flash".into(),
@@ -900,7 +901,7 @@ fn dsh_steps_cache_and_frames() {
     fs::write(&path, &bytes).unwrap();
     fs::write(session.join("session.lock"), "").unwrap();
 
-    let (rows, bad) = Source::from_id("dsh").unwrap().parse(&path).unwrap();
+    let (rows, bad) = Source::from_id("deepseek").unwrap().parse(&path).unwrap();
     assert_eq!(bad, 1);
     assert_eq!(rows.len(), 3);
     assert!(rows.iter().all(|r| r.session == "session-synthetic"));
@@ -915,14 +916,15 @@ fn dsh_steps_cache_and_frames() {
     assert_eq!((s.output_tokens, s.timed_output_tokens), (350, 300));
     assert_eq!(s.tokens_per_second, Some(50.0));
 
-    let mut args = Args::parse_from(["token-speed", "--provider", "dsh", "--all-time"]);
-    args.dsh_dir = vec![dir.path().into()];
+    let mut args = Args::parse_from(["token-speed", "--provider", "deepseek", "--all-time"]);
+    args.deepseek_dir = vec![dir.path().into()];
+    args.workbuddy_dir = vec!["/nonexistent/workbuddy".into()];
     args.magpie_dir = vec![dir.path().join("none")];
     args.cache = dir.path().join("index.sqlite3");
     let (rows, meta) = data::collect(&args, |_, _| {}).unwrap();
     assert_eq!(rows.len(), 3);
     assert_eq!(meta.parsed_files, 1);
-    assert!(rows.iter().all(|r| r.provider == Source::Dsh));
+    assert!(rows.iter().all(|r| r.provider == Source::Deepseek));
 }
 
 #[test]
@@ -956,8 +958,9 @@ fn dsh_reads_every_home_without_double_counting() {
     write("dsh", "a", "session.jsonl.zstd", &[100, 200]);
     write("dsh", "a", "session.v4.jsonl.zstd", &[100, 200]);
     write("other", "b", "session.v4.jsonl.zstd", &[40]);
-    let mut args = Args::parse_from(["token-speed", "--provider", "dsh", "--all-time"]);
-    args.dsh_dir = vec![dir.path().join("dsh"), dir.path().join("other")];
+    let mut args = Args::parse_from(["token-speed", "--provider", "deepseek", "--all-time"]);
+    args.deepseek_dir = vec![dir.path().join("dsh"), dir.path().join("other")];
+    args.workbuddy_dir = vec!["/nonexistent/workbuddy".into()];
     args.magpie_dir = vec![dir.path().join("none")];
     args.cache = dir.path().join("index.sqlite3");
     let (rows, meta) = data::collect(&args, |_, _| {}).unwrap();
@@ -976,14 +979,15 @@ fn optional_source_is_visible_when_its_directory_exists() {
     let dir = std::env::temp_dir().join(format!("token-speed-present-{}", std::process::id()));
     std::fs::create_dir_all(dir.join("sessions")).unwrap();
     let mut args = Args::parse_from(["token-speed"]);
-    args.dsh_dir = vec![dir.clone()];
+    args.deepseek_dir = vec![dir.clone()];
+    args.workbuddy_dir = vec!["/nonexistent/workbuddy".into()];
     args.magpie_dir = vec![dir.clone()];
     std::fs::write(dir.join("usage.jsonl"), "").unwrap();
     let app = app::App::new(args, Clock::new(Some("UTC")).unwrap());
     // The gateway ledger is filed under the agents in it: no tab of its own.
     assert_eq!(
         app.visible_sources(),
-        [Source::Codex, Source::Claude, Source::Dsh]
+        [Source::Codex, Source::Claude, Source::Deepseek]
     );
     std::fs::remove_dir_all(dir).unwrap();
 }
@@ -992,18 +996,18 @@ fn dsh_source_appears_once_indexed() {
     let mut app = demo_app();
     assert_eq!(app.visible_sources(), [Source::Codex, Source::Claude]);
     let mut extra = app.records[0].clone();
-    extra.provider = Source::Dsh;
+    extra.provider = Source::Deepseek;
     extra.id = "dsh-1".into();
     extra.model = "deepseek-test".into();
     app.records.push(extra);
     app.rebuild().unwrap();
     assert_eq!(
         app.visible_sources(),
-        [Source::Codex, Source::Claude, Source::Dsh]
+        [Source::Codex, Source::Claude, Source::Deepseek]
     );
     assert_eq!(app.view.sources[2].requests, 1);
     press(&mut app, KeyCode::Char('4'));
-    assert!(app.view.rows.iter().all(|r| r.provider == Source::Dsh));
+    assert!(app.view.rows.iter().all(|r| r.provider == Source::Deepseek));
     for screen in args::Screen::ALL {
         app.set_screen(screen);
         for (width, height) in [(140, 46), (80, 24), (40, 12)] {
@@ -1022,8 +1026,7 @@ fn dsh_source_appears_once_indexed() {
         .iter()
         .map(|c| c.symbol())
         .collect::<String>();
-    assert!(text.contains("4 DSH"));
-    assert!(text.contains("DSH"));
+    assert!(text.contains("4 DeepSeek"));
 }
 
 fn draw_at(app: &mut app::App, width: u16, height: u16) -> Vec<String> {
@@ -1166,10 +1169,10 @@ fn clicks_select_rows_buckets_and_close_dialogs() {
     let lines = draw_at(&mut app, 140, 46);
     let y = lines
         .iter()
-        .position(|l| l.contains("Codex  ") && l.contains('█'))
+        .position(|l| l.contains("Codex     ") && l.contains('█'))
         .unwrap();
-    let start = lines[y].find("Codex  ").unwrap();
-    let start = lines[y][..start].chars().count() + 7;
+    let start = lines[y].find("Codex     ").unwrap();
+    let start = lines[y][..start].chars().count() + 10;
     app.click(start as u16, y as u16).unwrap();
     assert_eq!(app.cursor, 0);
     let last = lines[y]
@@ -1270,8 +1273,8 @@ fn source_registry_is_consistent() {
     }
     assert_eq!(Source::from_id("unknown"), None, "no silent fallback");
     assert_eq!(
-        format!("[{:<6}]", Source::Dsh),
-        "[dsh   ]",
+        format!("[{:<6}]", Source::Deepseek),
+        "[deepseek]",
         "Display pads columns"
     );
     assert_eq!(Filter::from_digit(1), Some(Filter::ALL));
@@ -1287,7 +1290,10 @@ fn source_registry_is_consistent() {
         .iter()
         .map(|f| f.to_possible_value().unwrap().get_name().to_owned())
         .collect();
-    assert_eq!(values, ["all", "codex", "claude", "dsh", "other"]);
+    assert_eq!(
+        values,
+        ["all", "codex", "claude", "deepseek", "workbuddy", "other"]
+    );
     // Each source has its own directory flag and accent color.
     let args = Args::parse_from(["token-speed"]);
     let dirs: HashSet<_> = Source::ALL
@@ -1339,67 +1345,165 @@ fn magpie_line(agent: &str, t: &str, ms: u64, extra: Value) -> String {
 fn magpie_ledger_files_calls_under_their_agent_without_double_counting() {
     let dir = tempfile::tempdir().unwrap();
     let log = [
-        // Inside the span the DSH log covers below: the DSH log counts it.
+        // Inside the span the Codex log covers below: the Codex log counts it.
         magpie_line(
-            "dsh",
-            "2026-10-03T04:00:03Z",
+            "codex",
+            "2026-10-08T00:00:03Z",
             4000,
-            json!({"response_id": "a"}),
+            json!({"response_id": "a", "native_session": "S"}),
         ),
         // After it: only the ledger saw this one.
         magpie_line(
-            "dsh",
-            "2026-10-03T05:00:00Z",
+            "codex",
+            "2026-10-08T01:00:00Z",
             2000,
-            json!({"response_id": "b"}),
+            json!({"response_id": "b", "native_session": "S"}),
         ),
         // An agent with no parser, named by its session.
         magpie_line(
             "pi",
-            "2026-10-03T05:00:00Z",
+            "2026-10-08T01:00:00Z",
             2000,
             json!({"native_session": "s1"}),
         ),
-        // No usage: a cancelled call.
+        // `dsh` no longer names a source: its gateway calls are not
+        // DeepSeek's own and stay under `other`.
         magpie_line(
             "dsh",
-            "2026-10-03T05:00:09Z",
+            "2026-10-08T01:00:05Z",
+            2000,
+            json!({"response_id": "w"}),
+        ),
+        // No usage: a cancelled call.
+        magpie_line(
+            "codex",
+            "2026-10-08T01:00:09Z",
             10,
             json!({"in": 0, "cache_read": 0, "out": 0, "status": 499}),
         ),
     ]
     .join("\n");
     fs::write(dir.path().join("usage.jsonl"), log + "\n").unwrap();
-    let native = dir.path().join("dsh/sessions/s");
+    let native = dir.path().join("codex/sessions");
     fs::create_dir_all(&native).unwrap();
-    let lines = [
-        dsh(0, "step/start", json!({"turn": 1, "step": 1})),
-        dsh_message(5, 1, "m1", 200),
-    ];
-    fs::write(native.join("session.jsonl"), lines.join("\n") + "\n").unwrap();
+    let usage = json!({"input_tokens": 1000, "cached_input_tokens": 0, "output_tokens": 200});
+    let codex_log = [
+        codex(0, "session_meta", json!({"id": "S"})),
+        codex(0, "event_msg", json!({"type": "task_started"})),
+        codex(
+            5,
+            "token_usage_record",
+            json!({"response_id": "R", "usage": usage}),
+        ),
+    ]
+    .map(|v| v.to_string())
+    .join("\n");
+    fs::write(native.join("rollout-s.jsonl"), codex_log + "\n").unwrap();
     let mut args = Args::parse_from(["token-speed", "--all-time"]);
-    args.codex_dir = vec![dir.path().join("none")];
+    args.codex_dir = vec![dir.path().join("codex")];
     args.claude_dir = vec![dir.path().join("none")];
-    args.dsh_dir = vec![dir.path().join("dsh")];
+    args.deepseek_dir = vec![dir.path().join("none")];
+    args.workbuddy_dir = vec!["/nonexistent/workbuddy".into()];
     args.magpie_dir = vec![dir.path().into()];
     args.cache = dir.path().join("index.sqlite3");
     let (rows, _) = data::collect(&args, |_, _| {}).unwrap();
     let by = |s: Source| rows.iter().filter(|r| r.provider == s).collect::<Vec<_>>();
     assert_eq!(
-        by(Source::Dsh).len(),
+        by(Source::Codex).len(),
         2,
         "native call plus the ledger-only one"
     );
-    let ledger = by(Source::Dsh).into_iter().find(|r| r.id == "b").unwrap();
+    let ledger = by(Source::Codex).into_iter().find(|r| r.id == "b").unwrap();
     // Gateway input counts cache like the other sources do; reasoning stays inside output.
     assert_eq!((ledger.input_tokens, ledger.cached_tokens), (1000, 900));
     assert_eq!(ledger.rate(300.0), Some(25.0));
-    assert_eq!(by(Source::Other).len(), 1);
-    assert_eq!(by(Source::Other)[0].session, "pi/s1");
+    let other = by(Source::Other);
+    assert_eq!(other.len(), 2);
+    assert!(other.iter().any(|r| r.session == "pi/s1"));
+    assert!(other.iter().any(|r| r.session == "dsh"));
+    assert!(by(Source::Deepseek).is_empty());
     // Selecting one agent still brings in its ledger calls.
-    args.provider = Filter::only(Source::Dsh);
+    args.provider = Filter::only(Source::Codex);
     let (rows, _) = data::collect(&args, |_, _| {}).unwrap();
-    assert_eq!(rows.iter().filter(|r| r.provider == Source::Dsh).count(), 2);
+    assert_eq!(
+        rows.iter().filter(|r| r.provider == Source::Codex).count(),
+        2
+    );
+}
+
+#[test]
+fn deepseek_counts_only_its_own_api_calls() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = dir.path().join("sessions/p/session-x");
+    fs::create_dir_all(&session).unwrap();
+    let via = |id: &str, provider: &str| {
+        dsh(
+            9,
+            "assistant/message",
+            json!({"turn":1,"step":1,"message":{"role":"assistant","id":id,
+                "source":{"kind":"model","provider":provider,"model":"m"}},
+                "usage":{"inputTokens":10,"outputTokens":50,"cacheReadTokens":0,"reasoningTokens":0}}),
+        )
+    };
+    let lines = [
+        dsh(1, "step/start", json!({"turn":1,"step":1})),
+        via("own", "deepseek-official"),
+        // Sent through the gateway: not DeepSeek's own.
+        via("routed", "magpie"),
+    ];
+    let path = session.join("session.jsonl");
+    fs::write(&path, lines.join("\n") + "\n").unwrap();
+    let (rows, bad) = Source::Deepseek.parse(&path).unwrap();
+    assert_eq!(bad, 0);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "own");
+}
+
+fn workbuddy_line(stamp: &str, id: &str, prompt: &str, completion: &str, cost: &str) -> String {
+    let body = json!({"conversation_id": "conv-1", "message_id": id, "model": "wb-model",
+        "prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": "0",
+        "total_cost_ms": cost, "ttft_ms": "300", "think_total_tokens": "999"});
+    format!("[{stamp}] [Info] [pid=1] [ModelProvider]  [SseMonitor#abc] qua.end: {body}")
+}
+
+#[test]
+fn workbuddy_requests_come_from_their_end_lines() {
+    let dir = tempfile::tempdir().unwrap();
+    let day = dir.path().join("logs/2026-10-12");
+    fs::create_dir_all(&day).unwrap();
+    let log = [
+        "[10/12/2026, 5:18:50 PM.000] [Info] [ModelProvider] other chatter".to_string(),
+        workbuddy_line("10/12/2026, 5:19:00 PM.500", "m1", "1000", "200", "4000"),
+        // Logged twice: counted once.
+        workbuddy_line("10/12/2026, 5:19:00 PM.500", "m1", "1000", "200", "4000"),
+        // Failed before streaming: no usage.
+        workbuddy_line("10/12/2026, 5:19:10 PM.000", "m2", "0", "0", "800"),
+        // No duration: usage counts, speed stays missing.
+        workbuddy_line("10/12/2026, 5:19:20 PM.000", "m3", "500", "50", "0"),
+        // An end line cut mid-write is reported, not guessed.
+        "[10/12/2026, 5:19:30 PM.000] [Info] [SseMonitor#abc] qua.end: {\"conversation_id\": \"c"
+            .to_string(),
+    ]
+    .join("\n");
+    let path = day.join("2026-10-12-17-18-53__abc.log");
+    fs::write(&path, log + "\n").unwrap();
+    // Not a request log, and not under a source root.
+    fs::write(dir.path().join("logs/startup.log"), "qua.end: {}\n").unwrap();
+
+    let (rows, bad) = Source::Workbuddy.parse(&path).unwrap();
+    assert_eq!(bad, 1);
+    assert_eq!(rows.len(), 2);
+    let m1 = rows.iter().find(|r| r.id == "m1").unwrap();
+    assert_eq!((m1.input_tokens, m1.cached_tokens), (1000, 0));
+    // Logged completion tokens only: the estimated think count is ignored.
+    assert_eq!((m1.output_tokens, m1.reasoning_tokens), (200, 0));
+    assert_eq!(m1.session, "conv-1");
+    assert_eq!(m1.rate(300.0), Some(50.0));
+    // The line is stamped when the request ends.
+    assert_eq!(m1.timestamp - m1.start.unwrap(), 4.0);
+    let m3 = rows.iter().find(|r| r.id == "m3").unwrap();
+    assert!(m3.start.is_none());
+    assert_eq!(m3.rate(300.0), None);
 }
 
 #[test]
@@ -1447,20 +1551,21 @@ fn hidden_source_stays_out_of_every_view_unless_asked_for() {
             json!({"response_id": id}),
         )
     };
-    let log = [ledger("pi", "p1"), ledger("dsh", "d1")].join("\n");
+    let log = [ledger("pi", "p1"), ledger("codex", "d1")].join("\n");
     fs::write(dir.path().join("usage.jsonl"), log + "\n").unwrap();
     let mut args = Args::parse_from(["token-speed", "--all-time"]);
     args.codex_dir = vec![dir.path().join("none")];
     args.claude_dir = vec![dir.path().join("none")];
-    args.dsh_dir = vec![dir.path().join("none")];
+    args.deepseek_dir = vec![dir.path().join("none")];
+    args.workbuddy_dir = vec!["/nonexistent/workbuddy".into()];
     args.magpie_dir = vec![dir.path().into()];
     args.cache = dir.path().join("index.sqlite3");
     let clock = Clock::new(Some("UTC")).unwrap();
     let (rows, _) = data::collect(&args, |_, _| {}).unwrap();
-    // The ledger is still read: its dsh call belongs to a visible source.
+    // The ledger is still read: its codex call belongs to a visible source.
     let all = data::select(&rows, &args, clock).unwrap();
     assert_eq!(all.len(), 1);
-    assert_eq!(all[0].provider, Source::Dsh);
+    assert_eq!(all[0].provider, Source::Codex);
     // Asking for it by name brings its calls back.
     args.provider = Filter::only(Source::Other);
     let only = data::select(&rows, &args, clock).unwrap();
@@ -1544,7 +1649,8 @@ fn magpie_never_replaces_or_hides_the_agents_own_record() {
     let mut args = Args::parse_from(["token-speed", "--all-time"]);
     args.codex_dir = vec![dir.path().join("codex")];
     args.claude_dir = vec![dir.path().join("none")];
-    args.dsh_dir = vec![dir.path().join("none")];
+    args.deepseek_dir = vec![dir.path().join("none")];
+    args.workbuddy_dir = vec!["/nonexistent/workbuddy".into()];
     args.magpie_dir = vec![dir.path().into()];
     args.cache = dir.path().join("index.sqlite3");
     let (rows, _) = data::collect(&args, |_, _| {}).unwrap();
@@ -1576,7 +1682,8 @@ fn claude_resumed_session_counts_copied_messages_once() {
     let mut args = Args::parse_from(["token-speed", "--all-time"]);
     args.codex_dir = vec![dir.path().join("none")];
     args.claude_dir = vec![dir.path().join("claude")];
-    args.dsh_dir = vec![dir.path().join("none")];
+    args.deepseek_dir = vec![dir.path().join("none")];
+    args.workbuddy_dir = vec!["/nonexistent/workbuddy".into()];
     args.magpie_dir = vec![dir.path().join("none")];
     args.cache = dir.path().join("index.sqlite3");
     let (rows, _) = data::collect(&args, |_, _| {}).unwrap();

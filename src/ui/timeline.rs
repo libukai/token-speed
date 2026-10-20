@@ -332,7 +332,7 @@ pub(super) fn bucket_lines(app: &App) -> Vec<Line<'static>> {
             )
         };
         lines.push(Line::from(vec![
-            Span::styled(format!("{name:<8}"), bold(color)),
+            Span::styled(format!("{name:<10}"), bold(color)),
             Span::styled(note, style(pal.muted)),
         ]));
     }

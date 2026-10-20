@@ -13,7 +13,7 @@ use crate::{
 };
 use ratatui::{Frame, text::Line};
 
-/// "1 / 2 / 3 / 4  All / Codex / Claude / DSH", from the source registry.
+/// "1 / 2 / 3 / 4 / 5  All / Codex / Claude / DeepSeek / WorkBuddy", from the source registry.
 fn source_keys() -> String {
     let filters = std::iter::once(Filter::ALL)
         .chain(Source::ALL.map(Filter::only))

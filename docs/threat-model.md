@@ -2,7 +2,7 @@
 
 ## Assets and data flow
 
-The Rust binary reads Codex, Claude Code, DSH and Magpie usage logs chosen through CLI arguments / environment variables. It extracts usage metadata into a local SQLite index and displays or exports reports. Prompts and tool outputs are present in source logs but are not persisted by the index. Session identifiers, source paths, model names, timestamps and counts are intentionally retained and can identify activity.
+The Rust binary reads Codex, Claude Code, DeepSeek (DSH), WorkBuddy and Magpie usage logs chosen through CLI arguments / environment variables. It extracts usage metadata into a local SQLite index and displays or exports reports. Prompts and tool outputs are present in source logs but are not persisted by the index. Session identifiers, source paths, model names, timestamps and counts are intentionally retained and can identify activity.
 
 ## Trust boundaries
 

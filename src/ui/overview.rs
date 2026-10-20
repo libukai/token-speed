@@ -240,13 +240,13 @@ pub(super) fn coverage_line(f: &mut Frame, area: Rect, app: &mut App, p: Source,
         return;
     }
     let (name, color) = pal.source(p);
-    let mut spans = vec![Span::styled(format!("{name:<7}"), style(color))];
+    let mut spans = vec![Span::styled(format!("{name:<10}"), style(color))];
     if !app.args.provider.matches(p) {
         spans.push(Span::styled("hidden by source filter", style(pal.muted)));
     } else if app.view.bins.is_empty() {
         spans.push(Span::styled("Waiting for local data…", style(pal.muted)));
     } else {
-        let cells = area.width.saturating_sub(7) as usize;
+        let cells = area.width.saturating_sub(10) as usize;
         let count = app.view.bins.len();
         let max = app
             .view
@@ -260,7 +260,7 @@ pub(super) fn coverage_line(f: &mut Frame, area: Rect, app: &mut App, p: Source,
         for x in 0..cells {
             let i = x * count / cells.max(1);
             app.hits.push((
-                Rect::new(area.x + 7 + x as u16, area.y, 1, 1),
+                Rect::new(area.x + 10 + x as u16, area.y, 1, 1),
                 Click::Bucket(i),
             ));
             let (symbol, c) = if app.view.requests[i][p] == 0 {
@@ -414,7 +414,7 @@ pub(super) fn overview_note(f: &mut Frame, area: Rect, app: &App) {
                 style(pal.muted),
             ),
             Span::styled(
-                format!("  {:<6}", r.provider),
+                format!("  {:<9}", r.provider),
                 style(pal.accent(r.provider)),
             ),
             Span::styled(

@@ -4,9 +4,9 @@
 
 **一眼看清你的编程 Agent。**
 
-面向 Codex、Claude Code、DSH（DeepSeek Harness）以及任何接入 Magpie 网关的 Agent 的终端观测台。<br>
+面向 Codex、Claude Code、DeepSeek（经由 DeepSeek Harness）、WorkBuddy 以及任何接入 Magpie 网关的 Agent 的终端观测台。<br>
 四个视图，读取本地日志，一个原生 Rust 可执行文件。<br>
-<sub>Fork 自 [william1010121/token-speed](https://github.com/william1010121/token-speed)，新增 DSH 与 Magpie 网关数据源。</sub>
+<sub>Fork 自 [william1010121/token-speed](https://github.com/william1010121/token-speed)，新增 DeepSeek、WorkBuddy 与 Magpie 网关数据源。</sub>
 
 [![CI](https://github.com/libukai/token-speed/actions/workflows/ci.yml/badge.svg)](https://github.com/libukai/token-speed/actions/workflows/ci.yml)
 [![Rust](https://img.shields.io/badge/Rust-1.92%2B-dea584?logo=rust)](https://www.rust-lang.org/)
@@ -42,7 +42,7 @@ token-speed --today
 
 需要 **Rust 1.92+** 和 C 编译器，SQLite 已内置。Cargo 默认安装到 `~/.cargo/bin`，请确认它在 `PATH` 中。在 macOS 上，如果自定义的编译器封装导致 SDK 或链接错误，可设置 `CC=/usr/bin/clang` 和 `CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=/usr/bin/clang`（Intel 芯片用 `CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER`）。
 
-发布后，预编译文件和 npm 包 `@libukai/token-speed` 会附在 [Releases](https://github.com/libukai/token-speed/releases) 中。npm 上不带作用域的 `token-speed` 是[上游](https://github.com/william1010121/token-speed)项目，不含 DSH 和 Magpie 数据源。
+发布后，预编译文件和 npm 包 `@libukai/token-speed` 会附在 [Releases](https://github.com/libukai/token-speed/releases) 中。npm 上不带作用域的 `token-speed` 是[上游](https://github.com/william1010121/token-speed)项目，不含 DeepSeek、WorkBuddy 和 Magpie 数据源。
 
 ### 从源码构建
 
@@ -108,7 +108,7 @@ token-speed --provider claude --model opus --view requests
 | --- | --- |
 | `Tab` / `v`、`Shift-Tab`、`F1`–`F4` | 下一个 / 上一个视图，或直接跳转 |
 | 鼠标 | 点击标签页、来源、时间范围、表格行（再点一次看详情）、图表时间段和 `◐` 主题按钮；滚轮滚动 |
-| `1` / `2` / `3` / `4` | 全部 / Codex / Claude / DSH（有 DSH 日志时才显示） |
+| `1` – `5` | 全部 / Codex / Claude / DeepSeek / WorkBuddy（后两者有日志时才显示） |
 | `t` / `w` / `m` / `a`、`d` | 今天 / 7 天 / 30 天 / 全部；循环切换范围 |
 | `T` | 切换深色 / 浅色主题 |
 | `/`、`Esc` | 按模型或会话筛选；关闭 / 清除 |
@@ -151,7 +151,7 @@ token-speed --since 2026-10-01 --until 2026-10-08 --timezone Asia/Shanghai
 
 | 选项 | 作用 |
 | --- | --- |
-| `--provider all\|codex\|claude\|dsh\|other` | 选择来源；Magpie 的调用归入各自的 Agent，`other` 显示其余部分 |
+| `--provider all\|codex\|claude\|deepseek\|workbuddy\|other` | 选择来源；Magpie 的调用归入各自的 Agent，`other` 显示其余部分 |
 | `--model`、`--session` | 子串筛选 |
 | `--today`、`--days N`、`--all-time`、`--since`、`--until` | 时间范围 |
 | `--timezone` | IANA 时区；默认使用 `TZ`（需是 IANA 名称），否则用本地时区 |
@@ -161,7 +161,7 @@ token-speed --since 2026-10-01 --until 2026-10-08 --timezone Asia/Shanghai
 | `--group hour\|day\|model`、`--format table\|json\|csv` | 报表分组和格式 |
 | `--max-gap SECONDS` | 可用计时区间的上限，默认 300 |
 | `--interval SECONDS` | 面板刷新周期，默认 5，最小 1 |
-| `--codex-dir`、`--claude-dir`、`--dsh-dir`、`--magpie-dir`、`--cache` | 覆盖来源或索引位置 |
+| `--codex-dir`、`--claude-dir`、`--deepseek-dir`、`--workbuddy-dir`、`--magpie-dir`、`--cache` | 覆盖来源或索引位置 |
 | `--refresh` | 重建缓存条目 |
 
 ## 日志只留在你的机器上
@@ -170,7 +170,8 @@ token-speed --since 2026-10-01 --until 2026-10-08 --timezone Asia/Shanghai
 | --- | --- | --- |
 | Codex | `~/.codex/{sessions,archived_sessions}` | `CODEX_HOME` 或 `--codex-dir` |
 | Claude Code | `~/.claude/projects` | `CLAUDE_CONFIG_DIR` 或 `--claude-dir` |
-| DSH（DeepSeek Harness） | `~/.dsh/sessions`（`*.jsonl.zstd`） | `DSH_HOME` 或 `--dsh-dir`（可重复） |
+| DeepSeek（DeepSeek Harness，仅统计直连 DeepSeek 官方 API 的调用） | `~/.dsh/sessions`（`*.jsonl.zstd`） | `DSH_HOME` 或 `--deepseek-dir`（可重复） |
+| WorkBuddy | `~/.workbuddy/logs`（`*.log`） | `WORKBUDDY_HOME` 或 `--workbuddy-dir`（可重复） |
 | Magpie 网关（每条调用记录 `agent`） | `~/.config/magpie/usage.jsonl` | `MAGPIE_HOME` 或 `--magpie-dir`（可重复） |
 | SQLite 索引 | `~/.cache/token-speed/index.sqlite3` | `XDG_CACHE_HOME` 或 `--cache` |
 
@@ -188,7 +189,7 @@ token-speed --since 2026-10-01 --until 2026-10-08 --timezone Asia/Shanghai
 
 本项目 fork 自 **[william1010121/token-speed](https://github.com/william1010121/token-speed)**（MIT），上游提供了 Codex 和 Claude Code 解析器、四个视图、SQLite 索引以及发布与 npm 打包。本 fork 新增了：
 
-- **DSH**（DeepSeek Harness）数据源，按模型步骤计时。
+- **DeepSeek**（DeepSeek Harness）数据源，按模型步骤计时；**WorkBuddy** 数据源，读取其请求日志。
 - **Magpie** 网关账本数据源，统计接入网关的 Agent，并补上它们自身日志缺失的部分。
 - 数据源注册表、深色 / 浅色主题和鼠标支持、Codex / Claude 速度模式，以及标题下方的实时状态行。
 

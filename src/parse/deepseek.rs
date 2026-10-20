@@ -1,12 +1,19 @@
-//! DSH (DeepSeek Harness) session events. Each model call is a `step`,
+//! DeepSeek Harness (DSH) session events. Each model call is a `step`,
 //! bracketed by `step/start` and an `assistant/message` carrying its usage.
 //! Sessions are zstd-compressed JSONL, appended one frame per write.
+//!
+//! Only calls made straight to DeepSeek's own API (`source.provider` is
+//! `deepseek-official`) are counted. Calls DSH sent through another route,
+//! such as the Magpie gateway, belong to whatever sits behind it.
 
 use super::{Parsed, finish, merge_max, n, stamp, text};
 use crate::{data::Record, source::Source};
 use anyhow::Result;
 use serde_json::Value;
 use std::{collections::HashMap, fs, path::Path};
+
+/// `source.provider` of a call made straight to DeepSeek's API.
+const OFFICIAL: &str = "deepseek-official";
 
 pub fn is_log(name: &str) -> bool {
     super::is_jsonl(name) || name.ends_with(".jsonl.zstd") || name.ends_with(".jsonl.zst")
@@ -51,6 +58,9 @@ pub fn parse(path: &Path) -> Result<Parsed> {
                 }
             }
             "assistant/message" if p["usage"].is_object() => {
+                if text(&p["message"]["source"]["provider"]) != Some(OFFICIAL) {
+                    continue;
+                }
                 let Some(end) = stamp(&d["time"]) else {
                     continue;
                 };
@@ -75,7 +85,7 @@ fn record(session: &str, id: &str, p: &Value, end: f64, start: Option<f64>) -> R
     let cached = n(u, "cacheReadTokens");
     let written = n(u, "cacheWriteTokens");
     Record {
-        provider: Source::Dsh,
+        provider: Source::Deepseek,
         session: session.into(),
         id: id.into(),
         model: text(&p["message"]["source"]["model"])

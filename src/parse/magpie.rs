@@ -1,7 +1,7 @@
 //! Magpie gateway ledger (`usage.jsonl`): one line per model call that went
 //! through the gateway, whichever agent made it. It covers agents with no
 //! log of their own, and the stretches where an agent's own log is missing.
-//! A call is filed under the agent's source (`codex`, `claude`, `dsh`) or,
+//! A call is filed under the agent's source (`codex`, `claude`, `deepseek`, `workbuddy`) or,
 //! for an agent token-speed has no parser for, under `other`, with the agent
 //! named in the session.
 

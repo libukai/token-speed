@@ -4,9 +4,9 @@
 
 **Your coding agents, at a glance.**
 
-A terminal observatory for Codex, Claude Code and DSH (DeepSeek Harness), plus any agent behind a Magpie gateway.<br>
+A terminal observatory for Codex, Claude Code, DeepSeek (through DeepSeek Harness) and WorkBuddy, plus any agent behind a Magpie gateway.<br>
 Four views. Local logs. One native Rust binary.<br>
-<sub>A fork of [william1010121/token-speed](https://github.com/william1010121/token-speed) with DSH and Magpie gateway sources.</sub>
+<sub>A fork of [william1010121/token-speed](https://github.com/william1010121/token-speed) with DeepSeek, WorkBuddy and Magpie gateway sources.</sub>
 
 [![CI](https://github.com/libukai/token-speed/actions/workflows/ci.yml/badge.svg)](https://github.com/libukai/token-speed/actions/workflows/ci.yml)
 [![Rust](https://img.shields.io/badge/Rust-1.92%2B-dea584?logo=rust)](https://www.rust-lang.org/)
@@ -42,7 +42,7 @@ token-speed --today
 
 Requires **Rust 1.92+** and a C compiler. SQLite is bundled. Cargo installs to `~/.cargo/bin` by default; ensure it is on your `PATH`. On macOS, if a custom compiler wrapper causes SDK/linker errors, set `CC=/usr/bin/clang` and `CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=/usr/bin/clang` (Intel: `CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER`).
 
-Prebuilt binaries and the npm package `@libukai/token-speed` are attached to [releases](https://github.com/libukai/token-speed/releases) once published. The unscoped `token-speed` on npm is the [upstream](https://github.com/william1010121/token-speed) project, without the DSH and Magpie sources.
+Prebuilt binaries and the npm package `@libukai/token-speed` are attached to [releases](https://github.com/libukai/token-speed/releases) once published. The unscoped `token-speed` on npm is the [upstream](https://github.com/william1010121/token-speed) project, without the DeepSeek, WorkBuddy and Magpie sources.
 
 ### Build from source
 
@@ -108,7 +108,7 @@ token-speed --provider claude --model opus --view requests
 | --- | --- |
 | `Tab` / `v`, `Shift-Tab`, `F1`–`F4` | Next / previous view, or jump to one |
 | Mouse | Click tabs, sources, time windows, table rows (again for details), chart buckets and `◐` theme; wheel scrolls |
-| `1` / `2` / `3` / `4` | All / Codex / Claude / DSH (shown once DSH logs exist) |
+| `1` – `5` | All / Codex / Claude / DeepSeek / WorkBuddy (the last two shown once their logs exist) |
 | `t` / `w` / `m` / `a`, `d` | Today / 7 days / 30 days / all; cycle range |
 | `T` | Toggle dark / light theme |
 | `/`, `Esc` | Filter by model or session; close / clear |
@@ -151,7 +151,7 @@ Text tables have borders, right-aligned numeric columns and, for summaries, a to
 
 | Option | Purpose |
 | --- | --- |
-| `--provider all\|codex\|claude\|dsh\|other` | Choose source; Magpie calls are filed under their agent, `other` shows the rest |
+| `--provider all\|codex\|claude\|deepseek\|workbuddy\|other` | Choose source; Magpie calls are filed under their agent, `other` shows the rest |
 | `--model`, `--session` | Substring filters |
 | `--today`, `--days N`, `--all-time`, `--since`, `--until` | Time range |
 | `--timezone` | IANA timezone; defaults to `TZ` when it names one, else the local timezone |
@@ -161,7 +161,7 @@ Text tables have borders, right-aligned numeric columns and, for summaries, a to
 | `--group hour\|day\|model`, `--format table\|json\|csv` | Report grouping and format |
 | `--max-gap SECONDS` | Maximum usable timing interval; default 300 |
 | `--interval SECONDS` | Dashboard refresh period; default 5, minimum 1 |
-| `--codex-dir`, `--claude-dir`, `--dsh-dir`, `--magpie-dir`, `--cache` | Override source / index locations |
+| `--codex-dir`, `--claude-dir`, `--deepseek-dir`, `--workbuddy-dir`, `--magpie-dir`, `--cache` | Override source / index locations |
 | `--refresh` | Rebuild cached entries |
 
 ## Your logs stay on your machine
@@ -170,7 +170,8 @@ Text tables have borders, right-aligned numeric columns and, for summaries, a to
 | --- | --- | --- |
 | Codex | `~/.codex/{sessions,archived_sessions}` | `CODEX_HOME` or `--codex-dir` |
 | Claude Code | `~/.claude/projects` | `CLAUDE_CONFIG_DIR` or `--claude-dir` |
-| DSH (DeepSeek Harness) | `~/.dsh/sessions` (`*.jsonl.zstd`) | `DSH_HOME` or `--dsh-dir` (repeatable) |
+| DeepSeek (DeepSeek Harness, calls to DeepSeek's own API) | `~/.dsh/sessions` (`*.jsonl.zstd`) | `DSH_HOME` or `--deepseek-dir` (repeatable) |
+| WorkBuddy | `~/.workbuddy/logs` (`*.log`) | `WORKBUDDY_HOME` or `--workbuddy-dir` (repeatable) |
 | Magpie gateway (`agent` per call) | `~/.config/magpie/usage.jsonl` | `MAGPIE_HOME` or `--magpie-dir` (repeatable) |
 | SQLite index | `~/.cache/token-speed/index.sqlite3` | `XDG_CACHE_HOME` or `--cache` |
 
@@ -188,7 +189,7 @@ Maintainers: [npm packaging and publishing](docs/publishing.md).
 
 This is a fork of **[william1010121/token-speed](https://github.com/william1010121/token-speed)** (MIT), which provides the Codex and Claude Code parsers, the four views, the SQLite index and the release / npm packaging. This fork adds:
 
-- **DSH** (DeepSeek Harness) as a source, with per-step timing.
+- **DeepSeek** (DeepSeek Harness) as a source, with per-step timing, and **WorkBuddy** as a source, from its request logs.
 - The **Magpie** gateway ledger as a source, so agents behind it are counted and gaps in their own logs are filled.
 - A source registry, dark / light themes and mouse support, Codex / Claude speed mode, and the live status line under the title.
 

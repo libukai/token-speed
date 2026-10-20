@@ -3,8 +3,9 @@
 
 pub mod claude;
 pub mod codex;
-pub mod dsh;
+pub mod deepseek;
 pub mod magpie;
+pub mod workbuddy;
 
 use crate::data::Record;
 use anyhow::Result;

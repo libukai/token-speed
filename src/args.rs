@@ -72,7 +72,7 @@ impl Screen {
 #[derive(Parser, Clone, Debug)]
 #[command(
     version,
-    about = "Local token throughput observatory for coding agents (Codex, Claude Code, DSH, Magpie)",
+    about = "Local token throughput observatory for coding agents (Codex, Claude Code, DeepSeek, WorkBuddy, Magpie)",
     after_help = "Run token-speed with no arguments for the TUI, --table for a text report, or --json for JSON. Use summary/recent for scriptable reports."
 )]
 pub struct Args {
@@ -137,8 +137,10 @@ pub struct Args {
     pub codex_dir: Vec<PathBuf>,
     #[arg(long, default_values_os_t = [Source::Claude.default_dir()], help = "Claude Code home (CLAUDE_CONFIG_DIR); repeatable")]
     pub claude_dir: Vec<PathBuf>,
-    #[arg(long, default_values_os_t = [Source::Dsh.default_dir()], help = "DSH home (DSH_HOME); repeatable")]
-    pub dsh_dir: Vec<PathBuf>,
+    #[arg(long, alias = "dsh-dir", default_values_os_t = [Source::Deepseek.default_dir()], help = "DeepSeek Harness home (DSH_HOME); repeatable")]
+    pub deepseek_dir: Vec<PathBuf>,
+    #[arg(long, default_values_os_t = [Source::Workbuddy.default_dir()], help = "WorkBuddy home (WORKBUDDY_HOME); repeatable")]
+    pub workbuddy_dir: Vec<PathBuf>,
     #[arg(long, default_values_os_t = [Source::Other.default_dir()], help = "Magpie home (MAGPIE_HOME); repeatable")]
     pub magpie_dir: Vec<PathBuf>,
     #[arg(long, default_value_os_t=cache_path())]
@@ -160,7 +162,8 @@ impl Args {
         match source {
             Source::Codex => &self.codex_dir,
             Source::Claude => &self.claude_dir,
-            Source::Dsh => &self.dsh_dir,
+            Source::Deepseek => &self.deepseek_dir,
+            Source::Workbuddy => &self.workbuddy_dir,
             Source::Other => &self.magpie_dir,
         }
     }

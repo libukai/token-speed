@@ -22,7 +22,8 @@ use std::path::{Path, PathBuf};
 pub enum Source {
     Codex,
     Claude,
-    Dsh,
+    Deepseek,
+    Workbuddy,
     Other,
 }
 
@@ -72,15 +73,26 @@ const SPECS: [Spec; Source::COUNT] = [
         parse: parse::claude::parse,
     },
     Spec {
-        id: "dsh",
-        label: "DSH",
+        id: "deepseek",
+        label: "DeepSeek",
         env: "DSH_HOME",
         home: ".dsh",
         roots: &["sessions"],
         optional: true,
         hidden: false,
-        is_log: parse::dsh::is_log,
-        parse: parse::dsh::parse,
+        is_log: parse::deepseek::is_log,
+        parse: parse::deepseek::parse,
+    },
+    Spec {
+        id: "workbuddy",
+        label: "WorkBuddy",
+        env: "WORKBUDDY_HOME",
+        home: ".workbuddy",
+        roots: &["logs"],
+        optional: true,
+        hidden: false,
+        is_log: parse::workbuddy::is_log,
+        parse: parse::workbuddy::parse,
     },
     Spec {
         id: "other",
@@ -105,14 +117,20 @@ const _: () = {
         i += 1;
     }
     match Source::Codex {
-        Source::Codex | Source::Claude | Source::Dsh | Source::Other => {}
+        Source::Codex | Source::Claude | Source::Deepseek | Source::Workbuddy | Source::Other => {}
     }
 };
 
 impl Source {
-    pub const COUNT: usize = 4;
+    pub const COUNT: usize = 5;
     /// Display order; `index` positions per-source arrays.
-    pub const ALL: [Self; Self::COUNT] = [Self::Codex, Self::Claude, Self::Dsh, Self::Other];
+    pub const ALL: [Self; Self::COUNT] = [
+        Self::Codex,
+        Self::Claude,
+        Self::Deepseek,
+        Self::Workbuddy,
+        Self::Other,
+    ];
 
     pub fn index(self) -> usize {
         self as usize
@@ -222,6 +240,11 @@ impl ValueEnum for Filter {
         &FILTERS
     }
     fn to_possible_value(&self) -> Option<PossibleValue> {
-        Some(PossibleValue::new(self.0.map_or("all", Source::id)))
+        let value = PossibleValue::new(self.0.map_or("all", Source::id));
+        // `dsh` was this source's id before it was renamed.
+        Some(match self.0 {
+            Some(Source::Deepseek) => value.alias("dsh"),
+            _ => value,
+        })
     }
 }
