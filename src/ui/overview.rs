@@ -36,8 +36,19 @@ pub(super) fn leaderboard(f: &mut Frame, area: Rect, app: &App) {
         .and_then(|m| m.tokens_per_second)
         .unwrap_or(1.0)
         .max(1.0);
-    for (i, m) in models.iter().take((inner.height / 3) as usize).enumerate() {
-        let y = inner.y + i as u16 * 3;
+    // A model takes a label row, a bar row and a spacer. Without room for all
+    // of them the spacer goes; if that still is not enough, the last row says
+    // how many are left out instead of dropping the slowest silently.
+    let rows = inner.height as usize;
+    let stride: u16 = if models.len() * 3 <= rows { 3 } else { 2 };
+    let fits = rows / stride as usize;
+    let shown = if models.len() > fits {
+        fits.saturating_sub(1)
+    } else {
+        models.len()
+    };
+    for (i, m) in models.iter().take(shown).enumerate() {
+        let y = inner.y + i as u16 * stride;
         let name = short_model(&m.model);
         let label = Line::from(vec![
             Span::styled(
@@ -66,6 +77,16 @@ pub(super) fn leaderboard(f: &mut Frame, area: Rect, app: &App) {
                 .use_unicode(true),
             Rect::new(inner.x, y + 1, inner.width, 1),
         );
+    }
+    if models.len() > shown {
+        let y = inner.y + shown as u16 * stride;
+        if y < inner.bottom() {
+            f.render_widget(
+                Paragraph::new(format!("+{} more · Models tab", models.len() - shown))
+                    .style(style(pal.muted)),
+                Rect::new(inner.x, y, inner.width, 1),
+            );
+        }
     }
     if models.is_empty() {
         f.render_widget(
@@ -146,10 +167,12 @@ pub(super) fn overview(f: &mut Frame, area: Rect, app: &mut App) {
         let left = Layout::vertical([Constraint::Length(9), Constraint::Min(4)]).split(halves[0]);
         coverage_panel(f, left[0], app);
         overview_note(f, left[1], app);
-        // Activity needs two rows per source plus its border; velocity gets the rest.
-        let need = app.visible_sources().len() as u16 * 2 + 2;
+        // Activity needs two rows per source plus its border; velocity gets
+        // the rest and marks any models it has no room for.
+        let need =
+            (app.visible_sources().len() as u16 * 2 + 2).min(halves[1].height.saturating_sub(8));
         let right =
-            Layout::vertical([Constraint::Min(6), Constraint::Length(need)]).split(halves[1]);
+            Layout::vertical([Constraint::Min(5), Constraint::Length(need)]).split(halves[1]);
         leaderboard(f, right[0], app);
         activity(f, right[1], app);
     } else {

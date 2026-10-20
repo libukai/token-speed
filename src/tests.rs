@@ -1533,6 +1533,83 @@ fn workbuddy_requests_come_from_their_end_lines() {
 }
 
 #[test]
+fn overview_side_panels_list_every_source_and_say_when_they_cut() {
+    let mut app = demo_app();
+    let template = app.records[0].clone();
+    for (provider, speed) in [(Source::Deepseek, 140), (Source::Workbuddy, 175)] {
+        for hour in 0..3 {
+            let mut r = template.clone();
+            r.provider = provider;
+            r.session = format!("s-{provider}");
+            r.id = format!("{provider}-{hour}");
+            r.model = format!("{provider}-model");
+            r.start = Some(r.timestamp - 100.0);
+            r.output_tokens = speed * 100;
+            r.timing_source = "test".into();
+            app.records.push(r);
+        }
+    }
+    app.rebuild().unwrap();
+    assert_eq!(app.visible_sources().len(), 4);
+    // Four sources and four models: every one is named in both panels, at
+    // a normal height and at the tallest preview height.
+    for height in [46u16, 60] {
+        let lines = draw_at(&mut app, 140, height);
+        // Only the two panels: from the velocity title down, in its columns.
+        let (top, col) = lines
+            .iter()
+            .enumerate()
+            .find_map(|(y, l)| {
+                l.find("MODEL VELOCITY")
+                    .map(|b| (y, l[..b].chars().count()))
+            })
+            .expect("velocity panel is drawn");
+        let right: Vec<String> = lines[top..]
+            .iter()
+            .map(|l| l.chars().skip(col).collect::<String>())
+            .collect();
+        for name in ["CODEX", "CLAUDE", "DEEPSEEK", "WORKBUDDY"] {
+            assert!(
+                right.iter().any(|l| l.contains(name)),
+                "{name} missing from the right-hand panels at height {height}:\n{}",
+                right.join("\n")
+            );
+        }
+        // Each source has its title row and a trace row inside the panel
+        // (a source with gaps may draw few bars, so only the row is checked).
+        let activity = right
+            .iter()
+            .position(|l| l.contains("OUTPUT ACTIVITY"))
+            .expect("activity panel is drawn");
+        for name in ["Codex", "Claude", "DeepSeek", "WorkBuddy"] {
+            let at = right[activity..]
+                .iter()
+                .position(|l| l.contains(&format!("{name} ")))
+                .unwrap_or_else(|| {
+                    panic!("{name} missing from output activity at height {height}")
+                });
+            let trace = &right[activity + at + 1];
+            assert!(
+                !trace.contains('╯') && !trace.contains("OUTPUT"),
+                "{name} has no trace row at height {height}:\n{}",
+                right.join("\n")
+            );
+        }
+    }
+    // A panel too short for every model says how many it left out.
+    let lines = draw_at(&mut app, 140, 30);
+    let text = lines.join("\n");
+    let velocity_models = ["CODEX", "CLAUDE", "DEEPSEEK", "WORKBUDDY"]
+        .iter()
+        .filter(|n| text.contains(**n))
+        .count();
+    assert!(
+        velocity_models == 4 || text.contains("more"),
+        "a cut list must be marked:\n{text}"
+    );
+}
+
+#[test]
 fn live_status_sits_under_the_title_and_never_clips() {
     let mut app = demo_app();
     for (width, height) in [(140u16, 30u16), (100, 30), (80, 24), (60, 20)] {
