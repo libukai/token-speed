@@ -146,8 +146,10 @@ pub(super) fn overview(f: &mut Frame, area: Rect, app: &mut App) {
         let left = Layout::vertical([Constraint::Length(9), Constraint::Min(4)]).split(halves[0]);
         coverage_panel(f, left[0], app);
         overview_note(f, left[1], app);
-        let right = Layout::vertical([Constraint::Percentage(60), Constraint::Percentage(40)])
-            .split(halves[1]);
+        // Activity needs two rows per source plus its border; velocity gets the rest.
+        let need = app.visible_sources().len() as u16 * 2 + 2;
+        let right =
+            Layout::vertical([Constraint::Min(6), Constraint::Length(need)]).split(halves[1]);
         leaderboard(f, right[0], app);
         activity(f, right[1], app);
     } else {

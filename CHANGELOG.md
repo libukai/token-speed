@@ -1,12 +1,13 @@
 # Changelog
 
-## Unreleased
+## [0.5.0](https://github.com/libukai/token-speed/releases/tag/v0.5.0) — 2026-10-20
 
 The cache is rebuilt once.
 
 - The DSH source is now **DeepSeek** (`--provider deepseek`, `--deepseek-dir`; `dsh` and `--dsh-dir` still work) and counts only calls made straight to DeepSeek's own API. Calls DSH routed through another provider, such as the Magpie gateway, are skipped.
 - WorkBuddy source: reads the per-request `qua.end` lines in `~/.workbuddy/logs` (`--workbuddy-dir`, `WORKBUDDY_HOME`) with the request's token counts and total time. It has no cache counters, so cache stays zero.
 - Magpie ledger calls from the agent `dsh` are no longer filed under DeepSeek; they go to the hidden `other` source.
+- The source column and chart labels fit `workbuddy`, and the Overview's output-activity panel is sized to the number of sources.
 
 ## [0.4.0](https://github.com/libukai/token-speed/releases/tag/v0.4.0) — 2026-10-18
 
