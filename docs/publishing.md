@@ -8,7 +8,7 @@ After the release workflow has published a verified GitHub release, run from the
 
 ```sh
 # Keep npm/package.json and Cargo.toml versions equal.
-version=0.5.0
+version=0.5.1
 gh release download "v$version" --repo libukai/token-speed \
   --pattern '*.tar.gz' --pattern SHA256SUMS --dir dist/npm-release
 node scripts/prepare-npm.mjs dist/npm-release

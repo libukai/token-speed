@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [0.5.1](https://github.com/libukai/token-speed/releases/tag/v0.5.1) — 2026-10-21
 
 - Fix: the Overview's model velocity panel dropped the slowest models without saying so once there were more than it had room for. It now closes the gaps between rows first, then marks the models it still cannot show (`+N more`), and the output-activity panel keeps a row for every source.
 
