@@ -24,3 +24,7 @@ Flag new network access, persistence of prompt / tool bodies, or exposure of pri
 ### Interactive reliability
 
 Flag changes that block input while indexing, leave raw mode / mouse capture enabled after errors, or panic on empty data, resized terminals or concurrent cache access. Split and overlay views must keep missing timing visible. Safe path: background indexing, terminal cleanup on every exit, bounded layout / selection handling and serialized cache writes.
+
+## Cursor Cloud specific instructions
+
+There is no dev server. The stock image toolchain can be older than `rust-version`; this environment's install selects Rust 1.92.0 with `rustfmt` and `clippy`, then runs `cargo fetch --locked`. Validate with `cargo test --locked`, `cargo clippy --locked --all-targets -- -D warnings`, and `cargo fmt --check`. After `cargo build --locked`, also run `node --test scripts/npm-launcher.test.mjs` and `python3 scripts/test-terminal-signals.py target/debug/token-speed`. Exercise the binary with synthetic logs and explicit `--codex-dir`, `--claude-dir`, `--deepseek-dir`, `--workbuddy-dir`, `--magpie-dir`, and `--cache` paths.
